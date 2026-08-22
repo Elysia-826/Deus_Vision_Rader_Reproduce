@@ -216,3 +216,117 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# -----------------------------------------------------------------------------
+# Deus Vision Radar reproduce
+# Radio-first radar station; vision is auxiliary (HKUST RM2025 layout).
+# Keep source/config in git. Keep weights, datasets, and labels local.
+# Weight extensions are also listed in .gitattributes for Git LFS if
+# a release checkpoint is later force-added.
+# -----------------------------------------------------------------------------
+
+# Model weights (train locally; do not commit dumps)
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.engine
+*.trt
+*.plan
+*.weights
+*.tflite
+*.pb
+*.mlmodel
+*.param
+*.bin
+
+# Dataset images / video / depth / point cloud
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tif
+*.tiff
+*.webp
+*.gif
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.wmv
+*.flv
+*.npy
+*.npz
+*.pcd
+*.ply
+*.PLY
+*.stp
+
+# Serialized dumps (not source)
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.parquet
+*.cache
+*.label
+*.anno
+
+# Dataset / annotation workspaces (YOLO/COCO/VOC trees)
+/data/
+/datasets/
+/dataset/
+/training_workspace/
+/raw/
+/annotations/
+/labels/
+/images/
+**/images/train/
+**/images/val/
+**/images/test/
+**/labels/train/
+**/labels/val/
+**/labels/test/
+**/annotations/
+runs/
+wandb/
+lightning_logs/
+mlruns/
+ultralytics/
+weights/
+checkpoints/
+outputs/
+output/
+exp/
+exps/
+
+# Archives
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+
+# Local tooling / IDE
+.idea/
+.vscode/
+.codegraph/
+.omo/
+.opencode/
+.DS_Store
+Thumbs.db
+
+# Allow small tracked assets later (HKUST-style exceptions)
+!/docs/**/*.jpg
+!/docs/**/*.png
+!/docs/**/*.gif
+!/demo/**/*.jpg
+!/demo/**/*.png
+!/field/**/*.PLY
+!/field/**/*.ply
+!/field/**/*.png
+!/interface/**/*.jpg
+!/interface/**/*.png
+!/tracker/warmup_image.jpg
