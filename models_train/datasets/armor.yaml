@@ -1,0 +1,15 @@
+# 二阶段：装甲板检测。港科大开源集标签：
+#   0 死亡（灯条灭）  1 红灯条  2 蓝灯条
+# 图案（1~5 / 哨兵 / 前哨站）不在这一级，是第三级分类器的事。
+# 把 path 改成装甲板裁剪数据集根目录。
+# Ultralytics 按启动 cwd 解析 path，这里用绝对路径，避免相对路径落到错误目录。
+
+path: C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/dataset/armor_yolo
+train: images/train
+val: images/val
+test: images/test
+nc: 3
+names:
+  0: dead
+  1: red
+  2: blue
