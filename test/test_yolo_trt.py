@@ -98,25 +98,32 @@ def infer_frame(model: YOLO, frame):
     return result, fps, dt
 
 
-def run_image(model: YOLO, source: Path) -> None:
-    frame = cv2.imread(str(source))
-    if frame is None:
-        raise RuntimeError(f"无法读取图片: {source}")
-
-    model.predict(frame, verbose=False, device=DEVICE)
-    result, fps, _ = infer_frame(model, frame)
-    boxes = collect_boxes(result)
-    print_boxes(boxes, fps)
-    draw_boxes(frame, boxes)
+def draw_e2e_fps(frame, e2e_fps: float) -> None:
     cv2.putText(
         frame,
-        f"FPS: {fps:.1f}",
+        f"E2E FPS: {e2e_fps:.1f}",
         (12, 28),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.9,
         (0, 255, 255),
         2,
     )
+
+
+def run_image(model: YOLO, source: Path) -> None:
+    frame = cv2.imread(str(source))
+    if frame is None:
+        raise RuntimeError(f"无法读取图片: {source}")
+
+    model.predict(frame, verbose=False, device=DEVICE)
+    t0 = time.perf_counter()
+    result, _, _ = infer_frame(model, frame)
+    boxes = collect_boxes(result)
+    draw_boxes(frame, boxes)
+    elapsed = time.perf_counter() - t0
+    e2e_fps = 1.0 / elapsed if elapsed > 0 else 0.0
+    print_boxes(boxes, e2e_fps)
+    draw_e2e_fps(frame, e2e_fps)
     out = source.with_name(f"{source.stem}_trt.jpg")
     cv2.imwrite(str(out), frame)
     print(f"已保存: {out}")
@@ -139,31 +146,27 @@ def run_video(model: YOLO, source: Path) -> None:
 
     frame_id = 0
     infer_sum = 0.0
+    e2e_fps = 0.0
     t_all = time.perf_counter()
 
     while True:
+        t0 = time.perf_counter()
         ok, frame = cap.read()
         if not ok:
             break
 
-        result, fps, dt = infer_frame(model, frame)
+        result, _, dt = infer_frame(model, frame)
         infer_sum += dt
         frame_id += 1
         boxes = collect_boxes(result)
-        print_boxes(boxes, fps, frame_id)
+        print_boxes(boxes, e2e_fps, frame_id)
         draw_boxes(frame, boxes)
-        cv2.putText(
-            frame,
-            f"FPS: {fps:.1f}",
-            (12, 28),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
-            (0, 255, 255),
-            2,
-        )
+        draw_e2e_fps(frame, e2e_fps)
         cv2.imshow("YOLO TensorRT", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
+        elapsed = time.perf_counter() - t0
+        e2e_fps = 1.0 / elapsed if elapsed > 0 else 0.0
 
     cap.release()
     cv2.destroyAllWindows()
