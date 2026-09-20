@@ -1,0 +1,51 @@
+RMUC2026 radar scene — official armor assets
+============================================
+
+Downloaded 2026-08-27. Used for YOLO armor detection/sim
+(classes: dead / red / blue, plus number/sentry as next-stage labels).
+
+Models (DJI Referee System CAD)
+--------------------------------
+AM02 small armor 140 x 125 mm
+  https://rm-static.djicdn.com/tem/17348/RoboMaster Referee System Armor Modules AM02.STEP
+  -> models/AM02_small_armor.STEP
+  -> models/AM02_small_armor.stl  (FreeCAD tessellate 0.3 mm)
+
+AM12 large armor 235 x 127 mm  (hero)
+  https://rm-static.djicdn.com/tem/17348/RoboMaster Referee System Armor Modules AM12.STEP
+  -> models/AM12_large_armor.STEP
+  -> models/AM12_large_armor.stl
+
+Product page: https://www.robomaster.com/en-US/products/components/detail/1424
+
+Stickers
+--------
+RoboMaster 2026 robot building spec V1.3.0 (2026-02-09), appendix 2:
+  https://bbs-web-static.robomaster.com/715e2519e5384666a5d13edda17c6b831770696773838/RoboMaster%202026%20%E6%9C%BA%E7%94%B2%E5%A4%A7%E5%B8%88%E9%AB%98%E6%A0%A1%E7%B3%BB%E5%88%97%E8%B5%9B%E6%9C%BA%E5%99%A8%E4%BA%BA%E5%88%B6%E4%BD%9C%E8%A7%84%E8%8C%83%E6%89%8B%E5%86%8CV1.3.0%EF%BC%8820260209%EF%BC%89.pdf
+  -> docs/RM2026_robot_spec_V1.3.0.pdf
+  -> stickers/rm2026_appendix/page_103.png  hero 1 (230x124 mm) + engineer 2 (134x124)
+  -> stickers/rm2026_appendix/page_104.png  infantry 3 / 4 (134x124)
+  -> stickers/rm2026_appendix/page_105.png  sentry + outpost (134x124)
+
+Official RMU 2025 sticker zip (BBS article 372035, may need campus net):
+  https://bbs-web-static.robomaster.com/bbs-prod/20bad3f6c23b403f8071362184d01f46/RM2025 装甲贴纸.zip
+
+XJTU 笃行 2024 extracted official stickers + AI vectors (BBS article 9586):
+  https://hz-rm-bbs-web-prod.oss-cn-hangzhou.aliyuncs.com/attachment/pre/v1/202312/18/164341buhp7578ek5zpvrp.zip/装甲贴纸.zip
+  -> stickers/XJTU_armor_stickers.zip
+  -> stickers/cutouts_ascii/{1,2,3_small,4_small,sentry}.jpg
+  -> stickers/official_extracted/  (GBK names, includes .ai print files)
+
+YOLO textures in this scene
+---------------------------
+textures/ArmorTex_{red|blue}_{1,2,3,4,sentry}.png
+also copied to scene/ArmorTex_*.png and packed into RMUC2026_V2.0.0_radar.blend
+
+Layout: official number/icon on black plate + left/right LED bars
+(red #FF2828 / blue #2850FF). Small 140x125 mm, hero 235x127 mm.
+
+Blend
+-----
+Robot_*_armor_{left,right} resized to AM02 / AM12 face size.
+Official CAD meshes in collection OfficialArmorCAD (hidden, mm->m).
+Select any Robot_*_armor_right and view from the robot side to see the sticker.
