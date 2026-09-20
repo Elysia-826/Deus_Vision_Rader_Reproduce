@@ -1,0 +1,11 @@
+# 一阶段：整车检测。港科大开源集标签：0 -> 机器人。
+# 综合集 = dataset/car 真实 7:2:1 + 雷达仿真 1000 张。
+# path 相对本 yaml 所在目录（models/configs/）。
+
+path: ../../dataset/car_combined
+train: images/train
+val: images/val
+test: images/test
+nc: 1
+names:
+  0: robot

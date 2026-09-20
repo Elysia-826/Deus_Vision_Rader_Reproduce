@@ -1,0 +1,14 @@
+# 二阶段：装甲板检测。港科大开源集标签：
+#   0 死亡（灯条灭）  1 红灯条  2 蓝灯条
+# 图案（1~5 / 哨兵 / 前哨站）不在这一级，是第三级分类器的事。
+# path 相对本 yaml 所在目录（models/configs/）。
+
+path: ../../dataset/armor_yolo
+train: images/train
+val: images/val
+test: images/test
+nc: 3
+names:
+  0: dead
+  1: red
+  2: blue
