@@ -1,0 +1,19 @@
+# Ultralytics BoT-SORT，只给车级。
+# gmc_method=sparseOptFlow：补偿相机自身运动，静机可改 none 省几毫秒。
+# with_reid=False：全图机器人外观太像，ReID 不一定比 IoU+GMC 稳，还吃延迟。
+# tracker_type 必须是 botsort，改了 Ultralytics 不认这份文件。
+
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: False
+model: auto
