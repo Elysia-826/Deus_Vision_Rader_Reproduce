@@ -219,10 +219,8 @@ __marimo__/
 
 # -----------------------------------------------------------------------------
 # Deus Vision Radar reproduce
-# Radio-first radar station; vision is auxiliary (HKUST RM2025 layout).
-# Keep source/config in git. Keep weights, datasets, and labels local.
-# Weight extensions are also listed in .gitattributes for Git LFS if
-# a release checkpoint is later force-added.
+# Detection-only reproduce of HKUST RM2025 radar (YOLO26 + two-stage).
+# Keep source in git. Keep weights, datasets, videos, and sim binaries local.
 # -----------------------------------------------------------------------------
 
 # Model weights (train locally; do not commit dumps)
@@ -262,6 +260,11 @@ __marimo__/
 *.ply
 *.PLY
 *.stp
+*.STEP
+*.stl
+*.STL
+*.blend
+*.blend1
 
 # Serialized dumps (not source)
 *.pkl
@@ -276,7 +279,8 @@ __marimo__/
 # Dataset / annotation workspaces (YOLO/COCO/VOC trees)
 /data/
 /datasets/
-/dataset/
+/dataset/**
+!/dataset/*.py
 /training_workspace/
 /raw/
 /annotations/
@@ -318,15 +322,6 @@ exps/
 .DS_Store
 Thumbs.db
 
-# Allow small tracked assets later (HKUST-style exceptions)
-!/docs/**/*.jpg
-!/docs/**/*.png
-!/docs/**/*.gif
-!/demo/**/*.jpg
-!/demo/**/*.png
-!/field/**/*.PLY
-!/field/**/*.ply
-!/field/**/*.png
-!/interface/**/*.jpg
-!/interface/**/*.png
-!/tracker/warmup_image.jpg
+# Scene CAD / Blender stay local; scripts under scene/armor_assets are source.
+scene/locate_out/
+locate/calib/match_homography.json
