@@ -1,0 +1,11 @@
+{
+  "comment": "RMUC2026 28x15 m, origin at center, +x blue side (radar ~x=13). Edit field x/y to the year's official figure. Click the GROUND footprint, not armor plates.",
+  "click_order": ["outpost_blue", "outpost_red", "energy", "base_blue"],
+  "landmarks": [
+    {"id": "outpost_blue", "name_zh": "蓝前哨站", "x": 5.5, "y": 0.0},
+    {"id": "outpost_red", "name_zh": "红前哨站", "x": -5.5, "y": 0.0},
+    {"id": "energy", "name_zh": "能量机关", "x": 0.0, "y": 0.0},
+    {"id": "base_blue", "name_zh": "蓝方基地", "x": 12.5, "y": 0.0},
+    {"id": "base_red", "name_zh": "红方基地", "x": -12.5, "y": 0.0}
+  ]
+}

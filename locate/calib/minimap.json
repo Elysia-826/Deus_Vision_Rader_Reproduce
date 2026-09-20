@@ -1,0 +1,10 @@
+{
+  "image_size": [1683, 938],
+  "image_corners": [
+    [120.0, 95.0],
+    [1548.0, 95.0],
+    [1548.0, 860.0],
+    [120.0, 860.0]
+  ],
+  "comment": "TL,TR,BR,BL on rmuc_fig4_1_topdown.png. Aspect locked to 28x15. Re-click with python scripts/calibrate_minimap.py if overlay is off."
+}
