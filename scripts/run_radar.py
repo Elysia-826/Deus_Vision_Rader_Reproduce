@@ -14,6 +14,7 @@ import json
 import sys
 import time
 from enum import StrEnum
+from typing import assert_never
 from pathlib import Path
 
 import cv2
@@ -31,8 +32,14 @@ from locate.camera import camera_from_path  # noqa: E402
 from locate.errors import SourceNotReadyError  # noqa: E402
 from locate.homography import HomographyMap, homography_from_path  # noqa: E402
 from locate.minimap import minimap_from_path  # noqa: E402
-from locate.ray_plane import pixel_to_ground  # noqa: E402
-from locate.types import FieldXY, Pixel  # noqa: E402
+
+from locate.types import FieldXY  # noqa: E402
+from track.cascade import CascadeMatchTracker  # noqa: E402
+from track.errors import TruthFieldError, UnmappedRobotName  # noqa: E402
+from track.log import append_frame  # noqa: E402
+from track.observe import observations_from_result  # noqa: E402
+from track.truth import parse_sim_robots  # noqa: E402
+from track.types import PublishedTrack, SimRobot, Team  # noqa: E402
 
 # ========== 开关 ==========
 SOURCE = "blender"  # blender | video | hik
@@ -46,6 +53,7 @@ LIVE_PNG = _ROOT / "scene" / "locate_out" / "live_frame.png"
 LIVE_META = _ROOT / "scene" / "locate_out" / "live_meta.json"
 SHOW_GT = False
 TRAIL_LEN = 24
+IDENTITY_LOG = _ROOT / "scene" / "locate_out" / "identity_log.jsonl"
 # =========================
 
 ImageU8 = NDArray[uint8]
@@ -57,7 +65,7 @@ class FrameSource(StrEnum):
     HIK = "hik"
 
 
-def _read_meta() -> tuple[int, Path, tuple[FieldXY, ...]] | None:
+def _read_meta() -> tuple[int, Path, tuple[SimRobot, ...]] | None:
     if not LIVE_META.is_file():
         return None
     try:
@@ -71,8 +79,24 @@ def _read_meta() -> tuple[int, Path, tuple[FieldXY, ...]] | None:
             return None
         image = alt
     frame_id = int(raw["frame"])
-    robots = tuple(FieldXY(x=float(item["x"]), y=float(item["y"])) for item in raw.get("robots", []))
+    try:
+        robots = _robots(raw)
+    except (TruthFieldError, UnmappedRobotName) as exc:
+        print(exc, flush=True)
+        robots = ()
     return frame_id, image, robots
+
+
+def _robots(raw: dict[str, object]) -> tuple[SimRobot, ...]:  # noqa: OBJECT_OK
+    items = raw.get("robots", [])
+    if not isinstance(items, list):
+        raise TruthFieldError(key="robots", reason="not a list")
+    mappings: list[dict[str, str | int | float | bool | None]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise TruthFieldError(key="robots", reason="item is not an object")
+        mappings.append(item)
+    return parse_sim_robots(mappings)
 
 
 def _dot(board: ImageU8, u: float, v: float, color: tuple[int, int, int], tag: str) -> None:
@@ -107,47 +131,47 @@ def inset_minimap(camera: ImageU8, board: ImageU8) -> ImageU8:
     return camera
 
 
-def _to_field(pixel: Pixel, pose, homography: HomographyMap | None) -> FieldXY | None:
-    if homography is not None:
-        return homography.pixel_to_field(pixel)
-    if pose is None:
-        return None
-    return pixel_to_ground(pose, pixel)
+def _slot_bgr(team: Team) -> tuple[int, int, int]:
+    match team:
+        case Team.RED:
+            return (0, 0, 255)
+        case Team.BLUE:
+            return (255, 0, 0)
+        case unreachable:
+            assert_never(unreachable)
 
 
 def overlay(
     frame: ImageU8,
     result: vis2.FrameResult,
-    pose,
     calib,
     minimap: ImageU8,
-    truth: tuple[FieldXY, ...],
+    truth: tuple[SimRobot, ...],
+    publishes: tuple[PublishedTrack, ...],
     trails: dict[str, list[tuple[int, int]]],
     fps: float,
-    homography: HomographyMap | None = None,
 ) -> ImageU8:
     canvas = vis2.draw_result(frame, result, fps)
     board = minimap.copy()
     if SHOW_GT:
         for gt in truth:
-            px = calib.field_to_pixel(gt)
+            px = calib.field_to_pixel(FieldXY(x=gt.x, y=gt.y))
             cv2.circle(board, (int(px.u), int(px.v)), 8, (0, 255, 255), 2)
-    seen: set[str] = set()
+            cv2.putText(board, gt.label, (int(px.u) + 10, int(px.v) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+    by_bot = {item.bot_id: item.label for item in publishes if item.bot_id is not None}
     for robot in result.robots:
-        tag = vis_map._tag(robot)
-        pixel = vis_map.draw_foot(canvas, robot, tag)
-        hit = _to_field(pixel, pose, homography)
-        if hit is None or tag is None:
-            continue
-        mapped = calib.field_to_pixel(hit)
-        color = vis_map._bgr(robot)
+        vis_map.draw_foot(canvas, robot, by_bot.get(robot.car.track_id))
+    seen: set[str] = set()
+    for item in publishes:
+        mapped = calib.field_to_pixel(FieldXY(x=item.x, y=item.y))
+        color = _slot_bgr(item.team)
         pt = (int(round(mapped.u)), int(round(mapped.v)))
-        trail = trails.setdefault(tag, [])
+        trail = trails.setdefault(item.label, [])
         trail.append(pt)
         del trail[:-TRAIL_LEN]
-        seen.add(tag)
+        seen.add(item.label)
         _draw_trail(board, trail, color)
-        _dot(board, mapped.u, mapped.v, color, tag)
+        _dot(board, mapped.u, mapped.v, color, item.label)
     for tag in list(trails):
         if tag not in seen:
             trails.pop(tag, None)
@@ -184,12 +208,17 @@ def main() -> None:
     print("run_radar source", source.value, "loading detector…", flush=True)
     net, transform, device = vis2._load_classifier()
     detector = vis2._load_detector(vis2.PatternStage(net=net, transform=transform, device=str(device)))
-    vis2.warmup(detector, zeros((1080, 1920, 3), dtype=uint8))
+    vis2.warmup(detector, zeros((3000, 4096, 3), dtype=uint8))
     last_frame = -1
     trails: dict[str, list[tuple[int, int]]] = {}
+    tracker = CascadeMatchTracker()
+    last_tick: float | None = None
+    if source is FrameSource.BLENDER:
+        IDENTITY_LOG.parent.mkdir(parents=True, exist_ok=True)
+        IDENTITY_LOG.write_text("", encoding="utf-8")
     print("run_radar waiting for frames…", flush=True)
     while True:
-        truth: tuple[FieldXY, ...] = ()
+        truth: tuple[SimRobot, ...] = ()
         frame: ImageU8 | None = None
         if source is FrameSource.BLENDER:
             meta = _read_meta()
@@ -217,9 +246,15 @@ def main() -> None:
         t0 = time.perf_counter()
         result = detector.infer(frame)
         fps = 1.0 / max(time.perf_counter() - t0, 1e-6)
-        vis = overlay(frame, result, pose, calib, minimap, truth, trails, fps, homography)
+        now = time.perf_counter()
+        dt_s = 0.1 if last_tick is None else max(now - last_tick, 1e-3)
+        last_tick = now
+        publishes = tracker.step(observations_from_result(result, pose, homography), dt_s)
+        if source is FrameSource.BLENDER:
+            append_frame(IDENTITY_LOG, last_frame, truth, publishes)
+        vis = overlay(frame, result, calib, minimap, truth, publishes, trails, fps)
         cv2.imshow("radar", vis2._scale(vis))
-        print(f"[{last_frame}] cars {len(result.robots)}", flush=True)
+        print(f"[{last_frame}] cars {len(result.robots)} slots {len(publishes)}", flush=True)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
