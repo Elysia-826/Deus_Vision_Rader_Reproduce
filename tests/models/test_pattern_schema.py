@@ -11,6 +11,7 @@ def test_job_defaults_match_hkust_recipe(tmp_path: Path) -> None:
     assert job.batch == 32
     assert job.learning_rate == 0.0003
     assert job.backbone == "mobilenet_v3_small"
+    assert job.init_weights is None
 
 
 def test_inverse_frequency_upweights_rare_class() -> None:

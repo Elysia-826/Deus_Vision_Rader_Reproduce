@@ -6,6 +6,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from models.pattern.model import PatternBackbone
+
 DEFAULT_PATTERN_DATA: Path = Path(
     r"C:\Users\YQS\Downloads\OneDrive_3_2026-8-21\RM2025-Armor-Pattern-Public-Dataset"
 )
@@ -29,7 +31,8 @@ class PatternTrainJob(BaseModel):
     workers: int | None = Field(default=None, ge=0)
     pretrained: bool = True
     use_class_weight: bool = True
-    backbone: str = "mobilenet_v3_small"
+    backbone: PatternBackbone = PatternBackbone.MOBILENET_V3_SMALL
+    init_weights: Path | None = None
 
     @field_validator("data", mode="before")
     @classmethod

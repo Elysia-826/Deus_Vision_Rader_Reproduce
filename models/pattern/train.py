@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 
 from models.pattern.errors import PatternDatasetError
+from models.pattern.model import PatternBackbone
 from models.pattern.schema import DEFAULT_PATTERN_DATA, PatternTrainJob
 from models.pattern.trainer import train
 
@@ -38,6 +39,8 @@ def main(
     workers: int | None = typer.Option(None, help="DataLoader workers；默认 Windows=0"),
     pretrained: bool = typer.Option(True, help="ImageNet 预训练"),
     class_weight: bool = typer.Option(True, help="inverse-frequency 类权重"),
+    init_weights: Path | None = typer.Option(None, help="已有 best .pth，难例再训练时热启动"),
+    backbone: PatternBackbone = typer.Option(PatternBackbone.MOBILENET_V3_SMALL, help="mobilenet_v3_small / efficientnet_b0"),
 ) -> None:
     """训 MobileNetV3-Small 图案分类器。确认参数后再带 --data 跑。"""
     job = PatternTrainJob(
@@ -54,6 +57,8 @@ def main(
         workers=workers,
         pretrained=pretrained,
         use_class_weight=class_weight,
+        init_weights=init_weights,
+        backbone=backbone,
     )
     try:
         best = train(job)

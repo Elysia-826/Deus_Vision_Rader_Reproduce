@@ -50,13 +50,20 @@ def train(job: PatternTrainJob) -> Path:
     from torch.utils.data import DataLoader
 
     from models.pattern.dataset import PatternDataset
-    from models.pattern.model import MobileNetV3SmallClassifier
+    from models.pattern.model import PatternBackbone, build_classifier
     from models.pattern.transforms import train_transform, val_transform
 
     root = resolve_pattern_root(job.data)
     train_samples, val_samples = load_split(root, val_ratio=job.val_ratio, seed=job.seed)
     device = _torch_device(job.device)
-    model = MobileNetV3SmallClassifier(pretrained=job.pretrained).to(device)
+    model = build_classifier(
+        job.backbone,
+        pretrained=job.pretrained and job.init_weights is None,
+    ).to(device)
+    if job.init_weights is not None:
+        ckpt = torch.load(job.init_weights, map_location=device, weights_only=False)
+        state = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
+        model.load_state_dict(state)
     counts = count_by_pattern(train_samples)
     criterion: nn.Module
     if job.use_class_weight:
@@ -84,7 +91,12 @@ def train(job: PatternTrainJob) -> Path:
     run_dir = job.project / job.name
     ckpt_dir = run_dir / "models"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    best_path = ckpt_dir / "best_mobilenetv3_small.pth"
+    ckpt_name = (
+        "best_efficientnet_b0.pth"
+        if job.backbone is PatternBackbone.EFFICIENTNET_B0
+        else "best_mobilenetv3_small.pth"
+    )
+    best_path = ckpt_dir / ckpt_name
     best_acc = -1.0
 
     print(f"root={root} train={len(train_samples)} val={len(val_samples)} device={device}")
