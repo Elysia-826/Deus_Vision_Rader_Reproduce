@@ -16,26 +16,26 @@ if str(_ROOT) not in sys.path:
 
 import torch
 
-from models.pattern.model import MobileNetV3SmallClassifier
+from models.pattern.model import EfficientNetB0Classifier
 
 # ========== 填这里 ==========
-PT_PATH = str(_ROOT / "weights" / "pattern_best.pth")
-ENGINE_PATH = str(_ROOT / "weights" / "pattern_best.engine")
-ONNX_PATH = str(_ROOT / "weights" / "pattern_best.onnx")
-IMGSZ = 64
+PT_PATH = str(_ROOT / "weights" / "pattern_efficientnet_b0.pth")
+ENGINE_PATH = str(_ROOT / "weights" / "pattern_efficientnet_b0.engine")
+ONNX_PATH = str(_ROOT / "weights" / "pattern_efficientnet_b0.onnx")
+IMGSZ = 96
 OPSET = 18
 # ===========================
 
 
-def _load_net(pt_path: Path) -> MobileNetV3SmallClassifier:
-    net = MobileNetV3SmallClassifier(pretrained=False)
+def _load_net(pt_path: Path) -> EfficientNetB0Classifier:
+    net = EfficientNetB0Classifier(pretrained=False)
     ckpt = torch.load(pt_path, map_location="cpu", weights_only=False)
     net.load_state_dict(ckpt["model_state_dict"])
     net.eval()
     return net
 
 
-def _export_onnx(net: MobileNetV3SmallClassifier, onnx_path: Path) -> None:
+def _export_onnx(net: EfficientNetB0Classifier, onnx_path: Path) -> None:
     dummy = torch.zeros(1, 3, IMGSZ, IMGSZ)
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
