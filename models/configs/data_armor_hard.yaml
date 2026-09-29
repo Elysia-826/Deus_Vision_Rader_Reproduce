@@ -1,0 +1,11 @@
+# 装甲难例集：armor_yolo 原划分 + train 里的小框暗光副本。val/test 不掺副本。
+
+path: ../../dataset/armor_hard
+train: images/train
+val: images/val
+test: images/test
+nc: 3
+names:
+  0: dead
+  1: red
+  2: blue

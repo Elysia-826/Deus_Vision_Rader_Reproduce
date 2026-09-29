@@ -28,6 +28,22 @@ def test_resolve_data_yaml_rejects_missing_file(tmp_path: Path) -> None:
         resolve_data_yaml(missing, recipe_for(DetectStage.CAR))
 
 
+def test_resolve_data_yaml_pins_relative_path_to_yaml_parent(tmp_path: Path) -> None:
+    images = tmp_path / "dataset" / "armor_hard" / "images" / "val"
+    images.mkdir(parents=True)
+    cfg = tmp_path / "models" / "configs"
+    cfg.mkdir(parents=True)
+    yaml_path = cfg / "data_armor_hard.yaml"
+    yaml_path.write_text(
+        "path: ../../dataset/armor_hard\ntrain: images/train\nval: images/val\nnc: 3\nnames: {0: dead}\n",
+        encoding="utf-8",
+    )
+    resolved = resolve_data_yaml(yaml_path, recipe_for(DetectStage.ARMOR))
+    text = resolved.read_text(encoding="utf-8")
+    assert str((tmp_path / "dataset" / "armor_hard").resolve()) in text
+    assert resolved.parent == tmp_path / "dataset" / "armor_hard"
+
+
 def test_resolve_data_yaml_writes_root_layout(tmp_path: Path) -> None:
     generated = resolve_data_yaml(tmp_path, recipe_for(DetectStage.ARMOR))
     text = generated.read_text(encoding="utf-8")
@@ -54,4 +70,6 @@ def test_build_train_kwargs_cli_overrides_recipe(tmp_path: Path) -> None:
     assert kwargs["batch"] == 8
     assert kwargs["device"] == "cpu"
     assert kwargs["name"] == "smoke"
-    assert Path(str(kwargs["data"])).name == "custom.yaml"
+    data_out = Path(str(kwargs["data"]))
+    assert data_out.is_file()
+    assert str(tmp_path.resolve()) in data_out.read_text(encoding="utf-8")

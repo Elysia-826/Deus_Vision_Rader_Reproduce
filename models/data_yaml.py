@@ -27,16 +27,40 @@ def package_file(relative: str) -> Path:
 
 
 def resolve_data_yaml(data: Path, recipe: StageRecipe) -> Path:
-    """yaml 文件原样返回；目录则按配方生成 data.yaml。"""
+    """yaml 文件把 path 收成绝对路径；目录则按配方生成 data.yaml。
+
+    Ultralytics 8.4 不会把 yaml 里的相对 path 相对 yaml 自己解析，
+    不存在时会拼到 DATASETS_DIR 上，``../../dataset/foo`` 会指到桌面。
+    """
     if data.suffix.lower() in _YAML_SUFFIXES:
         if not data.is_file():
             raise DatasetConfigError(data, "data yaml does not exist")
-        return data
+        return _with_absolute_dataset_root(data)
     if not data.is_dir():
         raise DatasetConfigError(data, "expected a data yaml or dataset directory")
     generated = data / "data.yaml"
     generated.write_text(_render_data_yaml(data, recipe), encoding="utf-8")
     return generated
+
+
+def _with_absolute_dataset_root(yaml_path: Path) -> Path:
+    """把 configs 里的相对 path 钉成绝对路径，再交给 Ultralytics。"""
+    raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise DatasetConfigError(yaml_path, "data yaml must be a mapping")
+    root = raw.get("path")
+    if not isinstance(root, str):
+        return yaml_path
+    path = Path(root)
+    if path.is_absolute():
+        return yaml_path
+    resolved = (yaml_path.parent / path).resolve()
+    if not resolved.exists():
+        raise DatasetConfigError(yaml_path, f"dataset root does not exist: {resolved}")
+    raw["path"] = str(resolved)
+    out = resolved / "ultralytics_data.yaml"
+    out.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return out
 
 
 def _render_data_yaml(root: Path, recipe: StageRecipe) -> str:

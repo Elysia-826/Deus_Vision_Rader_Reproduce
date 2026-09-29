@@ -36,6 +36,12 @@ def build_train_kwargs(job: TrainJob) -> dict[str, str | int | float | bool]:
 
 def train(job: TrainJob) -> Path:
     """微调 YOLO26，返回 best.pt。ultralytics 延迟导入，没装也能跑单测。"""
+    import os
+
+    # 本机独立 CUDNN 和 PyTorch 自带版本冲突时，AMP / conv2d 会直接炸。
+    os.environ["PATH"] = os.pathsep.join(
+        part for part in os.environ.get("PATH", "").split(os.pathsep) if "CUDNN" not in part.upper()
+    )
     from ultralytics import YOLO
 
     kwargs = build_train_kwargs(job)

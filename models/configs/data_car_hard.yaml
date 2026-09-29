@@ -1,0 +1,9 @@
+# 车辆难例集：真实 car_yolo 全留，仿真里 ≥3 车的图只进 train。val 仍是真实集。
+
+path: ../../dataset/car_hard
+train: images/train
+val: images/val
+test: images/test
+nc: 1
+names:
+  0: robot
