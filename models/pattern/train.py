@@ -29,18 +29,18 @@ def main(
     ),
     epochs: int = typer.Option(100, help="默认 100，对齐港科大"),
     batch: int = typer.Option(32, help="默认 32"),
-    imgsz: int = typer.Option(64, help="默认 64"),
+    imgsz: int = typer.Option(96, help="默认 96，EfficientNet-B0"),
     learning_rate: float = typer.Option(0.0003, "--lr", help="Adam lr"),
     val_ratio: float = typer.Option(0.2, help="类文件夹布局时的分层验证比例"),
     seed: int = typer.Option(42, help="split / 增强种子"),
     device: str = typer.Option("0", help="cuda 编号 / cpu"),
     project: Path = typer.Option(Path("runs/pattern"), help="输出根目录"),
-    name: str = typer.Option("mobilenetv3-small", help="本次 run 名"),
+    name: str = typer.Option("efficientnet-b0", help="本次 run 名"),
     workers: int | None = typer.Option(None, help="DataLoader workers；默认 Windows=0"),
     pretrained: bool = typer.Option(True, help="ImageNet 预训练"),
     class_weight: bool = typer.Option(True, help="inverse-frequency 类权重"),
     init_weights: Path | None = typer.Option(None, help="已有 best .pth，难例再训练时热启动"),
-    backbone: PatternBackbone = typer.Option(PatternBackbone.MOBILENET_V3_SMALL, help="mobilenet_v3_small / efficientnet_b0"),
+    backbone: PatternBackbone = typer.Option(PatternBackbone.EFFICIENTNET_B0, help="efficientnet_b0 / mobilenet_v3_small"),
 ) -> None:
     """训 MobileNetV3-Small 图案分类器。确认参数后再带 --data 跑。"""
     job = PatternTrainJob(

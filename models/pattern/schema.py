@@ -21,17 +21,17 @@ class PatternTrainJob(BaseModel):
     data: Path
     epochs: int = Field(default=100, ge=1)
     batch: int = Field(default=32, ge=1)
-    imgsz: int = Field(default=64, ge=32)
+    imgsz: int = Field(default=96, ge=32)
     learning_rate: float = Field(default=0.0003, gt=0.0)
     val_ratio: float = Field(default=0.2, gt=0.0, lt=1.0)
     seed: int = 42
     device: str = "0"
     project: Path = Path("runs/pattern")
-    name: str = "mobilenetv3-small"
+    name: str = "efficientnet-b0"
     workers: int | None = Field(default=None, ge=0)
     pretrained: bool = True
     use_class_weight: bool = True
-    backbone: PatternBackbone = PatternBackbone.MOBILENET_V3_SMALL
+    backbone: PatternBackbone = PatternBackbone.EFFICIENTNET_B0
     init_weights: Path | None = None
 
     @field_validator("data", mode="before")
