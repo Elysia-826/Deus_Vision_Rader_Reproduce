@@ -19,7 +19,7 @@ import torch
 from models.pattern.model import MobileNetV3SmallClassifier
 
 # ========== 填这里 ==========
-PT_PATH = str(_ROOT / "runs" / "pattern" / "mobilenetv3-small" / "models" / "best_mobilenetv3_small.pth")
+PT_PATH = str(_ROOT / "weights" / "pattern_best.pth")
 ENGINE_PATH = str(_ROOT / "weights" / "pattern_best.engine")
 ONNX_PATH = str(_ROOT / "weights" / "pattern_best.onnx")
 IMGSZ = 64

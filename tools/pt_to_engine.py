@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+
+os.environ["PATH"] = os.pathsep.join(
+    part for part in os.environ.get("PATH", "").split(os.pathsep) if "CUDNN" not in part.upper()
+)
 
 import ultralytics
 from ultralytics import YOLO
 
 # ========== 填这里 ==========
-PT_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\runs\detect\car-yolo26s-fast-3\weights\best.pt"
+PT_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\weights\car_best.pt"
 ENGINE_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\weights\car_best.engine"
 IMGSZ = 1280  # 装甲板 192，车辆 1280
 DEVICE = 0
