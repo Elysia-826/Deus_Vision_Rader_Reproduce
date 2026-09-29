@@ -119,12 +119,10 @@ class TwoStageDetector:
 
     @classmethod
     def from_config(cls, config: TwoStageConfig, *, pattern: PatternStage | None = None) -> TwoStageDetector:
-        from ultralytics import YOLO
-
         return cls(
             config,
-            YOLO(config.car_weights, task="detect"),
-            YOLO(config.armor_weights, task="detect"),
+            _load_detector(config.car_weights),
+            _load_detector(config.armor_weights),
             pattern=pattern,
         )
 
@@ -240,6 +238,18 @@ def _detections_from_result(result: _YoloResult) -> tuple[Detection, ...]:
     raw_ids = boxes.id
     track_ids = [int(item) for item in _as_floats(raw_ids)] if raw_ids is not None else None
     return detections_from_rows(xyxy_rows, confs, class_ids, _names_table(result.names), track_ids)
+
+
+def _load_detector(weights: str) -> _YoloModel:
+    """`.engine` 走直接 TensorRT。`.pt` 仍用 Ultralytics，方便没编 engine 时调试。"""
+    path = Path(weights)
+    if path.suffix.lower() == ".engine":
+        from detect.trt_model import TrtDetectModel
+
+        return TrtDetectModel(path)
+    from ultralytics import YOLO
+
+    return YOLO(weights, task="detect")
 
 
 def warmup(detector: TwoStageDetector, frame: ImageU8) -> None:

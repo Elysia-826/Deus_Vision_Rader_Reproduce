@@ -31,3 +31,12 @@ class ImageReadError(Exception):
 
     def __str__(self) -> str:
         return f"cannot read image or video: {self.path}"
+
+
+@dataclass(frozen=True, slots=True)
+class EngineLoadError(Exception):
+    path: Path
+    reason: str
+
+    def __str__(self) -> str:
+        return f"{self.path}: {self.reason}"
