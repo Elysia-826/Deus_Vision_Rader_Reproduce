@@ -1,7 +1,4 @@
-"""Set radar cameras to the selected 8 mm / 1.1-inch lens, match coverage spot, rebake, save blend.
-
-MV-CH120-60UC is 4096×3000, 3.45 μm (sensor 14.1312×10.35 mm). f/1.4 does not enter K.
-"""
+"""Bake 1.1-inch radar coverage for 6/8/12 mm into docs/. Does not save the blend."""
 
 from __future__ import annotations
 
@@ -12,38 +9,19 @@ import bpy
 from mathutils import Euler, Vector
 
 ROOT = Path(__file__).resolve().parents[2]
-LENS_MM = 8.0
+DOCS = ROOT / "docs"
+SENSOR_W = 14.1312
+LENSES = (6.0, 8.0, 12.0)
+RESTORE_MM = 8.0
 OVERLAY_W = 29.2
 OVERLAY_H = 15.6
-BAKE_X = 365
-BAKE_Y = 195
+BAKE_X = 876
+BAKE_Y = 468
 CAMS = ("Camera_Radar_Blue", "Camera_Radar_Red")
-OUT = {
-    "Camera_Radar_Blue": ROOT / "scene" / "materials" / "radar_visibility_blue.png",
-    "Camera_Radar_Red": ROOT / "scene" / "materials" / "radar_visibility_red.png",
-}
-IMG_NAME = {
-    "Camera_Radar_Blue": "RadarVisibility_Blue",
-    "Camera_Radar_Red": "RadarVisibility_Red",
-}
 
 
 def h_fov_rad(lens_mm: float, sensor_w: float) -> float:
     return 2.0 * math.atan(sensor_w / (2.0 * lens_mm))
-
-
-def set_cameras() -> float:
-    fov = None
-    for name in CAMS:
-        ob = bpy.data.objects[name]
-        cam = ob.data
-        cam.lens = LENS_MM
-        fov = h_fov_rad(cam.lens, cam.sensor_width)
-        print(name, "lens", cam.lens, "sensor_w", cam.sensor_width, "fov_h_deg", round(math.degrees(fov), 2))
-    spot = bpy.data.objects["Radar_Coverage_Spot"]
-    spot.data.spot_size = fov if fov is not None else h_fov_rad(LENS_MM, 14.1312)
-    print("spot_size_deg", round(math.degrees(spot.data.spot_size), 2), "color", list(spot.data.color))
-    return spot.data.spot_size
 
 
 def _snapshot_hide() -> dict[str, bool]:
@@ -59,13 +37,22 @@ def _restore_hide(state: dict[str, bool]) -> None:
 def _hide_others_for_bake() -> None:
     keep = {"Radar_Coverage_Spot", "VisibilityBakePlane", "VisibilityBakeCam"}
     for ob in bpy.data.objects:
-        if ob.name in keep:
-            ob.hide_render = False
-        else:
-            ob.hide_render = True
+        ob.hide_render = ob.name not in keep
 
 
-def bake_visibility() -> None:
+def _set_lens(lens_mm: float) -> float:
+    fov = h_fov_rad(lens_mm, SENSOR_W)
+    for name in CAMS:
+        cam = bpy.data.objects[name].data
+        cam.lens = lens_mm
+        cam.sensor_width = SENSOR_W
+    bpy.data.objects["Radar_Coverage_Spot"].data.spot_size = fov
+    return fov
+
+
+def bake_one(lens_mm: float) -> None:
+    fov = _set_lens(lens_mm)
+    print("lens", lens_mm, "fov_h_deg", round(math.degrees(fov), 2))
     scene = bpy.context.scene
     old = (
         scene.render.engine,
@@ -75,14 +62,21 @@ def bake_visibility() -> None:
         scene.render.filepath,
         scene.camera,
         scene.render.film_transparent,
+        scene.render.image_settings.file_format,
     )
-    engines = bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items.keys()
-    scene.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 24
+    scene.cycles.use_denoising = False
     scene.render.resolution_x = BAKE_X
     scene.render.resolution_y = BAKE_Y
     scene.render.resolution_percentage = 100
     scene.render.film_transparent = False
     scene.render.image_settings.file_format = "PNG"
+    view = scene.view_settings
+    old_view = (view.view_transform, view.look, view.exposure)
+    view.view_transform = "Standard"
+    view.look = "None"
+    view.exposure = 0.0
 
     if "VisibilityBakePlane" in bpy.data.objects:
         bpy.data.objects.remove(bpy.data.objects["VisibilityBakePlane"], do_unlink=True)
@@ -103,7 +97,7 @@ def bake_visibility() -> None:
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if bsdf is not None:
-        bsdf.inputs["Base Color"].default_value = (0.02, 0.02, 0.02, 1.0)
+        bsdf.inputs["Base Color"].default_value = (0.08, 0.08, 0.08, 1.0)
         bsdf.inputs["Roughness"].default_value = 1.0
         if "Metallic" in bsdf.inputs:
             bsdf.inputs["Metallic"].default_value = 0.0
@@ -121,30 +115,34 @@ def bake_visibility() -> None:
     hide_state = _snapshot_hide()
     spot = bpy.data.objects["Radar_Coverage_Spot"]
     old_parent = spot.parent
+    old_energy = spot.data.energy
+    spot.data.energy = max(old_energy, 800.0)
     _hide_others_for_bake()
     plane.hide_render = False
     cam_ob.hide_render = False
     spot.hide_render = False
 
-    for cam_name, path in OUT.items():
+    for cam_name in CAMS:
+        side = "blue" if "Blue" in cam_name else "red"
+        path = DOCS / f"radar_fov_1.1inch_{int(lens_mm)}mm_{side}.png"
         cam = bpy.data.objects[cam_name]
-        spot.parent = cam
-        spot.location = Vector((0.0, 0.0, 0.0))
-        spot.rotation_euler = Euler((0.0, 0.0, 0.0))
+        cam.hide_render = False
+        world = cam.matrix_world.copy()
+        spot.parent = None
+        spot.matrix_world = world
         bpy.context.view_layer.update()
         scene.render.filepath = str(path)
         bpy.ops.render.render(write_still=True)
-        img = bpy.data.images.get(IMG_NAME[cam_name])
-        if img is not None:
-            img.filepath = str(path)
-            img.reload()
-        print("baked", cam_name, path)
+        print("baked", path)
 
     spot.parent = old_parent
     spot.location = Vector((0.0, 0.0, 0.0))
     spot.rotation_euler = Euler((0.0, 0.0, 0.0))
+    spot.data.energy = old_energy
+    view.view_transform = old_view[0]
+    view.look = old_view[1]
+    view.exposure = old_view[2]
     _restore_hide(hide_state)
-    # overlays stay viewport-hidden as before
     for name in ("VisibilityOverlay_Blue", "VisibilityOverlay_Red"):
         ob = bpy.data.objects.get(name)
         if ob is not None:
@@ -164,13 +162,15 @@ def bake_visibility() -> None:
     scene.render.filepath = old[4]
     scene.camera = old[5]
     scene.render.film_transparent = old[6]
+    scene.render.image_settings.file_format = old[7]
 
 
 def main() -> None:
-    set_cameras()
-    bake_visibility()
-    bpy.ops.wm.save_mainfile()
-    print("saved", bpy.data.filepath)
+    DOCS.mkdir(parents=True, exist_ok=True)
+    for lens_mm in LENSES:
+        bake_one(lens_mm)
+    restore = _set_lens(RESTORE_MM)
+    print("restored lens", RESTORE_MM, "fov_h_deg", round(math.degrees(restore), 2), "no blend save")
 
 
 if __name__ == "__main__":
