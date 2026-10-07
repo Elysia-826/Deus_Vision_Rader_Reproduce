@@ -70,6 +70,14 @@ def test_one_frame_crossed_labels_do_not_swap_slots() -> None:
     assert by_label["B1"].x == pytest.approx(2.0, abs=0.35)
 
 
+def test_first_agree_frame_is_published() -> None:
+    tracker = CascadeMatchTracker()
+    out = tracker.step((_obs(1, 0.0, 0.0, Team.RED, Role.THREE),), dt_s=1.0)
+    assert len(out) == 1
+    assert out[0].label == "R3"
+    assert out[0].phase is TrackPhase.TENTATIVE
+
+
 def test_occlusion_coasts_with_last_velocity_instead_of_vanishing() -> None:
     tracker = CascadeMatchTracker()
     tracker.step((_obs(1, 0.0, 0.0, Team.RED, Role.THREE),), dt_s=1.0)

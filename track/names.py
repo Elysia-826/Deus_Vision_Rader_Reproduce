@@ -16,6 +16,7 @@ _ROLE_BY_TOKEN: Final[dict[str, Role]] = {
     "4": Role.FOUR,
     "hero": Role.ONE,
     "engineer": Role.TWO,
+    "infantry": Role.THREE,
     "sentry": Role.SENTRY,
     "s": Role.SENTRY,
 }
