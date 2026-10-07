@@ -3,7 +3,7 @@
 港科大原仓库是「粗到细」三级：
   1. 全图车辆检测  YOLOv12-s @ 1280
   2. 车辆 ROI 装甲板检测  YOLOv12-n @ 192
-  3. 装甲板图案分类  MobileNet-V2 @ 64   ← 不是 YOLO，见 models.pattern
+  3. 装甲板图案分类  EfficientNet-B0 @ 96   ← 不是 YOLO，见 models.pattern
 
 本文件只固化前两级的默认权重、输入尺寸和类别名。
 CLI 没显式覆盖时，trainer 一律读这里。

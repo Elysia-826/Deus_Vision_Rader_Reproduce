@@ -1,4 +1,4 @@
-"""第三级：装甲图案分类。骨干 MobileNetV3-Small @ 64。
+"""第三级：装甲图案分类。骨干 EfficientNet-B0 @ 96。
 
 训练入口 python -m models.pattern.train。推理时把 PatternStage 注入 TwoStageDetector。
 """

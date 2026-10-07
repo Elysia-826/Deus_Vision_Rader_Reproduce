@@ -14,7 +14,7 @@ DEFAULT_PATTERN_DATA: Path = Path(
 
 
 class PatternTrainJob(BaseModel):
-    """一次 MobileNetV3-Small 图案分类训练。frozen：拼好后不许再改。"""
+    """一次 EfficientNet-B0 图案分类训练。frozen：拼好后不许再改。"""
 
     model_config = ConfigDict(frozen=True)
 

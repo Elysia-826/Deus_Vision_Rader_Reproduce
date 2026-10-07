@@ -1,4 +1,4 @@
-"""MobileNetV3-Small 微调循环。torch 只在 train() 里进。"""
+"""EfficientNet-B0 微调循环。torch 只在 train() 里进。"""
 
 from __future__ import annotations
 

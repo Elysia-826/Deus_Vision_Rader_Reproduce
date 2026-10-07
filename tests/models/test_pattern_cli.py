@@ -9,8 +9,8 @@ def test_bare_invoke_does_not_train() -> None:
     assert "best weights" not in result.stdout
 
 
-def test_help_mentions_v3_small_and_64() -> None:
+def test_help_mentions_efficientnet_b0_and_96() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "64" in result.stdout
-    assert "mobilenetv3-small" in result.stdout
+    assert "96" in result.stdout
+    assert "efficientnet-b0" in result.stdout

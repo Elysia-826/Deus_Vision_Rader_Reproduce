@@ -42,7 +42,7 @@ def main(
     init_weights: Path | None = typer.Option(None, help="已有 best .pth，难例再训练时热启动"),
     backbone: PatternBackbone = typer.Option(PatternBackbone.EFFICIENTNET_B0, help="efficientnet_b0 / mobilenet_v3_small"),
 ) -> None:
-    """训 MobileNetV3-Small 图案分类器。确认参数后再带 --data 跑。"""
+    """训 EfficientNet-B0 图案分类器。确认参数后再带 --data 跑。"""
     job = PatternTrainJob(
         data=data,
         epochs=epochs,

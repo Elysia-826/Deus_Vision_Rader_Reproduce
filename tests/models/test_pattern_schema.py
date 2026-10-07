@@ -4,7 +4,7 @@ from models.pattern.schema import PatternTrainJob
 from models.pattern.trainer import inverse_frequency_weights
 
 
-def test_job_defaults_match_hkust_recipe(tmp_path: Path) -> None:
+def test_job_defaults_match_efficientnet_b0_recipe(tmp_path: Path) -> None:
     job = PatternTrainJob(data=tmp_path)
     assert job.imgsz == 96
     assert job.epochs == 100

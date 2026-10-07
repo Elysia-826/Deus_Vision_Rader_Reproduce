@@ -1,7 +1,7 @@
-"""装甲 ROI → MobileNetV3 图案。颜色仍由装甲 YOLO 的 red/blue/dead 提供。
+"""装甲 ROI → EfficientNet-B0 图案。颜色仍由装甲 YOLO 的 red/blue/dead 提供。
 
 港科大第三级是 MobileNet-V2 @ 64，带颜色的 14 类文件夹。本仓把颜色丢掉，
-只认 6 类兵种，和 models.pattern.classes.CLASS_NAMES 对齐。
+只认 6 类兵种 @ 96，和 models.pattern.classes.CLASS_NAMES 对齐。
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def attach_patterns(
             crop = frame[box.y1 : box.y2, box.x1 : box.x2]
             if crop.size == 0:
                 continue
-            # OpenCV 帧是 BGR，训练/MobileNet 是 RGB；::-1 比再 import cv2 轻。
+            # OpenCV 帧是 BGR，训练/分类器是 RGB；::-1 比再 import cv2 轻。
             rgb = crop[:, :, ::-1].copy()
             tensors.append(stage.transform(Image.fromarray(rgb)))
             keys.append((robot_i, armor_i))

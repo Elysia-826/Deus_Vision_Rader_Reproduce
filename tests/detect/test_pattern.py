@@ -29,7 +29,7 @@ def test_attach_patterns_writes_sentry_name_on_red_armor() -> None:
     car = Detection(label="robot", conf=0.9, box=BBox(20, 10, 80, 60))
     armor = Detection(label="red", conf=0.7, box=BBox(25, 16, 35, 26))
     robots = (LinkedRobot(car=car, armors=(armor,)),)
-    stage = PatternStage(net=_ConstPatternNet(4), transform=val_transform(64), device="cpu")
+    stage = PatternStage(net=_ConstPatternNet(4), transform=val_transform(96), device="cpu")
 
     out = attach_patterns(frame, robots, stage)
 
@@ -44,7 +44,7 @@ def test_attach_patterns_leaves_empty_crop_without_pattern() -> None:
     car = Detection(label="robot", conf=0.9, box=BBox(20, 10, 80, 60))
     armor = Detection(label="blue", conf=0.5, box=BBox(0, 0, 0, 0))
     robots = (LinkedRobot(car=car, armors=(armor,)),)
-    stage = PatternStage(net=_ConstPatternNet(0), transform=val_transform(64), device="cpu")
+    stage = PatternStage(net=_ConstPatternNet(0), transform=val_transform(96), device="cpu")
 
     out = attach_patterns(frame, robots, stage)
 
