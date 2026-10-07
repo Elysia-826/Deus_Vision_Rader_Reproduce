@@ -72,8 +72,9 @@ def set_render_size() -> None:
     scene = bpy.context.scene
     engines = bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items.keys()
     scene.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
-    scene.render.resolution_x = 1920
-    scene.render.resolution_y = 1080
+    # 必须和 radar_sim_loop.py 一致，K 按这个分辨率写出
+    scene.render.resolution_x = 4096
+    scene.render.resolution_y = 3000
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
 
@@ -188,6 +189,8 @@ def main() -> None:
     dump_cameras()
     if wants_render():
         render_frame()
+    bpy.ops.wm.save_mainfile()
+    print("saved blend", bpy.data.filepath, "res", bpy.context.scene.render.resolution_x, bpy.context.scene.render.resolution_y)
 
 
 if __name__ == "__main__":
