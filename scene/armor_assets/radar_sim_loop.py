@@ -170,8 +170,9 @@ def setup(camera_name: str) -> list[bpy.types.Object]:
     scene = bpy.context.scene
     engines = bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items.keys()
     scene.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
-    scene.render.resolution_x = 1920
-    scene.render.resolution_y = 1080
+    # 必须和 dump_radar_cameras.py / locate/calib/Camera_Radar_*.json 的 image_size 一致
+    scene.render.resolution_x = 4096
+    scene.render.resolution_y = 3000
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "JPEG"
     scene.render.image_settings.quality = 75

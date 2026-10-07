@@ -14,7 +14,8 @@ X_MIN, X_MAX = -12.5, 12.5
 Y_MIN, Y_MAX = -7.0, 7.0
 MIN_DIST = 1.35
 MIN_BOX = 0.008
-RES_X, RES_Y = 1920, 1080
+# 和 radar_sim_loop / MV-CH120-60UC 一致。旧的 1920×1080 不是这台 8 mm 相机。
+RES_X, RES_Y = 4096, 3000
 
 
 def argv_after_double_dash() -> list[str]:
@@ -146,17 +147,21 @@ def prepare_scene() -> None:
     col = bpy.data.collections.get("radar_viz")
     if col is not None:
         col.hide_render = True
-    spot = bpy.data.objects.get("Radar_Coverage_Spot")
-    if spot is not None:
-        spot.hide_render = True
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE"
+    engines = bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items.keys()
+    scene.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
     scene.render.resolution_x = RES_X
     scene.render.resolution_y = RES_Y
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "JPEG"
-    scene.render.image_settings.quality = 92
+    scene.render.image_settings.quality = 75
     scene.render.film_transparent = False
+    eevee = getattr(scene, "eevee", None)
+    if eevee is not None:
+        if hasattr(eevee, "taa_render_samples"):
+            eevee.taa_render_samples = 1
+        if hasattr(eevee, "taa_samples"):
+            eevee.taa_samples = 1
 
 
 def write_label(path: Path, boxes: list[tuple[float, float, float, float]]) -> None:
