@@ -36,7 +36,7 @@
 ## 2. 准备
 
 - Python 环境已能 `import cv2`、`ultralytics`、TensorRT（有 `.engine` 时）
-- 权重放 `weights/`：`car_best.engine`、`armor_best.engine`、`pattern_best.engine`（不进 git）
+- 权重放 `weights/`：`car_best.engine`、`armor_best.engine`、`pattern_efficientnet_b0.engine`（不进 git；main 分支图案仍是 `pattern_best.engine`）
 - 仿真另需本机 Blender：`D:\Program Files\blender\blender.exe`
 - 仓库根目录执行下面所有命令
 
@@ -128,7 +128,7 @@ LOCATE_MODE = "homography"
 1. 先 `SOURCE = "video"`，用赛场录像把检测和单应跑通
 2. 标定 `match_homography.json`
 3. 海康 RTSP 接上后，用 `cv2.VideoCapture(rtsp_url)` 替换图源，检测/小地图不用改
-4. 分辨率必须和标定时那一帧一致（当前按 1920×1080）
+4. 分辨率必须和标定时那一帧一致。选定机是海康 MV-CH120-60UC，4096×3000，像元 3.45 μm；镜头 1.1 英寸靶面 8 mm f/1.4。仿真内参按这个写，上场单应仍要在实拍画面上重标
 
 俯视图四角 `locate/calib/minimap.json` 在场地还是 28×15 时不用重做。
 
