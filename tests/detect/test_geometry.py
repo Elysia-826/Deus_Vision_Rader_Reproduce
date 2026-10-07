@@ -4,8 +4,14 @@ import numpy as np
 import pytest
 
 from detect.errors import EmptyCropError
-from detect.geometry import clamp_box, crop_roi, remap_box
+from detect.geometry import clamp_box, crop_roi, plausible_car_box, remap_box
 from detect.types import BBox
+
+
+def test_plausible_car_box_drops_short_and_tall() -> None:
+    assert plausible_car_box(BBox(20, 10, 80, 60))
+    assert not plausible_car_box(BBox(20, 10, 80, 30))
+    assert not plausible_car_box(BBox(10, 0, 30, 80))
 
 
 def test_clamp_box_keeps_in_bounds() -> None:
