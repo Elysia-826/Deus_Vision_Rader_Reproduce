@@ -88,13 +88,15 @@ class TrtDetectModel:  # noqa: MUTABLE_OK — 持有 engine context、stream 和
         self._context = engine.create_execution_context()
         self._input, self._output = _io_names(engine)
         in_shape = tuple(int(dim) for dim in engine.get_tensor_shape(self._input))
+        out_shape = tuple(int(dim) for dim in engine.get_tensor_shape(self._output))
+        self._batch = max(1, int(in_shape[0]))
         self._size = int(in_shape[2])
         self._half = engine.get_tensor_dtype(self._input) == trt.DataType.HALF
         self._names = _class_names(meta)
         self._stream = torch.cuda.Stream()
         dtype = torch.float16 if self._half else torch.float32
-        self._inp = torch.empty((1, 3, self._size, self._size), device="cuda", dtype=dtype)
-        self._out = torch.empty((1, 300, 6), device="cuda", dtype=torch.float32)
+        self._inp = torch.empty((self._batch, 3, self._size, self._size), device="cuda", dtype=dtype)
+        self._out = torch.empty(out_shape, device="cuda", dtype=torch.float32)
         self._tracker: object | None = None
         self._tracker_yaml: str | None = None
 
@@ -111,7 +113,7 @@ class TrtDetectModel:  # noqa: MUTABLE_OK — 持有 engine context、stream 和
     ) -> list[_HostResult]:
         del imgsz, iou, device, verbose
         images = source if isinstance(source, list) else [source]
-        return [self._one(image, conf, max_det, track_ids=None) for image in images]
+        return [self._boxes_from_rows(rows, conf, max_det, None) for rows in self._forward_many(images)]
 
     def track(
         self,
@@ -130,14 +132,13 @@ class TrtDetectModel:  # noqa: MUTABLE_OK — 持有 engine context、stream 和
         images = source if isinstance(source, list) else [source]
         return [self._track_one(image, conf, max_det, tracker) for image in images]
 
-    def _one(
+    def _boxes_from_rows(
         self,
-        image: ImageU8,
+        rows: NDArray[float32],
         conf: float,
         max_det: int,
         track_ids: list[int] | None,
     ) -> _HostResult:
-        rows = self._forward(image)
         picked = select_e2e(rows, conf, max_det)
         if picked.conf.shape[0] == 0:
             return _HostResult(boxes=None, names=self._names)
@@ -153,13 +154,16 @@ class TrtDetectModel:  # noqa: MUTABLE_OK — 持有 engine context、stream 和
         )
 
     def _track_one(self, image: ImageU8, conf: float, max_det: int, tracker: str) -> _HostResult:
-        rows = self._forward(image)
-        picked = select_e2e(rows, conf=0.01, max_det=max(max_det, 10))
+        rows = self._forward_many([image])[0]
+        picked = select_e2e(rows, conf=conf, max_det=max(max_det, 10))
         view = _view_from(picked.xyxy, picked.conf, picked.cls)
         tracks = self._botsort(tracker).update(view, image, None)
         if tracks.shape[0] == 0:
             return _HostResult(boxes=None, names=self._names)
         kept = tracks[:max_det]
+        kept = kept[kept[:, 5] >= conf]
+        if kept.shape[0] == 0:
+            return _HostResult(boxes=None, names=self._names)
         return _HostResult(
             boxes=_HostBoxes(
                 xyxy=_HostTensor(kept[:, :4].tolist()),
@@ -170,21 +174,38 @@ class TrtDetectModel:  # noqa: MUTABLE_OK — 持有 engine context、stream 和
             names=self._names,
         )
 
-    def _forward(self, image: ImageU8) -> NDArray[float32]:
-        height, width = image.shape[0], image.shape[1]
-        pad = letterbox_params(width, height, self._size)
-        canvas = _canvas(image, pad, self._size)
-        uploaded = torch.from_numpy(canvas).cuda()
-        rgb = uploaded[:, :, [2, 1, 0]].permute(2, 0, 1).unsqueeze(0)
-        self._inp.copy_(rgb.to(dtype=self._inp.dtype).div_(255))
-        self._context.set_tensor_address(self._input, int(self._inp.data_ptr()))
-        self._context.set_tensor_address(self._output, int(self._out.data_ptr()))
-        if not self._context.execute_async_v3(int(self._stream.cuda_stream)):
-            raise EngineLoadError(Path(self._input), "execute_async_v3 failed")
-        self._stream.synchronize()
-        raw = self._out[0].detach().cpu().numpy().copy()
-        raw[:, :4] = undo_xyxy(raw[:, :4], pad)
-        return raw
+    def _forward_many(self, images: list[ImageU8]) -> list[NDArray[float32]]:
+        if not images:
+            return []
+        packed: list[NDArray[float32]] = []
+        for start in range(0, len(images), self._batch):
+            chunk = images[start : start + self._batch]
+            pads: list[Letterbox] = []
+            canvases: list[NDArray[uint8]] = []
+            for image in chunk:
+                height, width = image.shape[0], image.shape[1]
+                pad = letterbox_params(width, height, self._size)
+                pads.append(pad)
+                canvases.append(_canvas(image, pad, self._size))
+            stacked = np.stack(canvases, axis=0)
+            if stacked.shape[0] < self._batch:
+                pad_n = self._batch - stacked.shape[0]
+                filler = np.full((pad_n, self._size, self._size, 3), _PAD, dtype=uint8)
+                stacked = np.concatenate([stacked, filler], axis=0)
+            uploaded = torch.from_numpy(stacked).cuda()
+            rgb = uploaded[:, :, :, [2, 1, 0]].permute(0, 3, 1, 2)
+            self._inp.copy_(rgb.to(dtype=self._inp.dtype).div_(255))
+            self._context.set_tensor_address(self._input, int(self._inp.data_ptr()))
+            self._context.set_tensor_address(self._output, int(self._out.data_ptr()))
+            if not self._context.execute_async_v3(int(self._stream.cuda_stream)):
+                raise EngineLoadError(Path(self._input), "execute_async_v3 failed")
+            self._stream.synchronize()
+            raw = self._out.detach().cpu().numpy().copy()
+            for index, pad in enumerate(pads):
+                rows = raw[index]
+                rows[:, :4] = undo_xyxy(rows[:, :4], pad)
+                packed.append(rows)
+        return packed
 
     def _botsort(self, tracker: str) -> object:
         if self._tracker is not None and self._tracker_yaml == tracker:

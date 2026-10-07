@@ -18,6 +18,7 @@ from ultralytics import YOLO
 PT_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\weights\car_best.pt"
 ENGINE_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\weights\car_best.engine"
 IMGSZ = 1280  # 装甲板 192，车辆 1280
+BATCH = 1  # 车=1；装甲导出改 8，多 ROI 一次 enqueue
 DEVICE = 0
 HALF = True  # TensorRT FP16（ONNX 先出 half，再交给 TRT 11 strongly-typed）
 WORKSPACE = None  # GiB；None 用 TensorRT 默认
@@ -44,10 +45,10 @@ def _metadata(model: YOLO) -> dict[str, object]:
         "version": ultralytics.__version__,
         "stride": stride_i,
         "task": "detect",
-        "batch": 1,
+        "batch": BATCH,
         "imgsz": [IMGSZ, IMGSZ],
         "names": names,
-        "args": {"imgsz": IMGSZ, "half": HALF, "batch": 1},
+        "args": {"imgsz": IMGSZ, "half": HALF, "batch": BATCH},
         "channels": 3,
     }
 
@@ -61,6 +62,7 @@ def _export_onnx(model: YOLO) -> Path:
         simplify=True,
         opset=18,
         dynamic=False,
+        batch=BATCH,
     )
     return Path(str(exported)).resolve()
 
