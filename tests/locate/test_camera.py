@@ -41,6 +41,26 @@ def test_blender_identity_camera_matches_looking_down() -> None:
     np.testing.assert_allclose(tvec.reshape(3), [0.0, 0.0, 10.0])
 
 
+def test_shipped_radar_k_is_mv_ch120_8mm() -> None:
+    """MV-CH120-60UC，3.45 μm，4096×3000，1.1 英寸靶面 8 mm。主点在中心，未测畸变。"""
+    pixel_um = 3.45
+    width, height = 4096, 3000
+    expected = blender_intrinsics(
+        lens_mm=8.0,
+        sensor_width_mm=width * pixel_um / 1000.0,
+        sensor_height_mm=height * pixel_um / 1000.0,
+        sensor_fit="HORIZONTAL",
+        pixel_width=width,
+        pixel_height=height,
+    )
+    root = Path(__file__).resolve().parents[2] / "locate" / "calib"
+    for name in ("Camera_Radar_Blue.json", "Camera_Radar_Red.json"):
+        pose = camera_from_path(root / name)
+        assert (pose.width, pose.height) == (width, height)
+        np.testing.assert_allclose(pose.K, expected)
+        assert float(pose.K[0, 0]) == pytest.approx(8.0 / 0.00345)
+
+
 def test_blender_intrinsics_horizontal_36mm() -> None:
     k = blender_intrinsics(
         lens_mm=50.0,
