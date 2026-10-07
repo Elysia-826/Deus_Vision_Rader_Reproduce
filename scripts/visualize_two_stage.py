@@ -6,7 +6,7 @@
 #     python scripts/visualize_two_stage.py
 # ──────────────────
 
-"""港科大粗到细可视化：车 YOLO → 装甲 YOLO → MobileNetV3 图案。
+"""港科大粗到细可视化：车 YOLO → 装甲 YOLO → MobileNetV3-Small 图案。
 
 检测全部走 detect.TwoStageDetector（含图案）。本文件只负责读视频、画框、TensorRT 包装。
 .engine 优先：本机 cuDNN 和 TensorRT 同卡容易抢上下文，车/装甲都用 engine 时不要再加载 .pt。
@@ -49,13 +49,14 @@ from models.pattern.transforms import val_transform  # noqa: E402
 # ========== 填这里 ==========
 CAR_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/car_best.engine"  # 空则按 car_best.engine / car_best.pt / car_last.pt 自动找
 ARMOR_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/armor_best.engine"  # 空则按 armor_best.engine / armor_best.pt 自动找
-PATTERN_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/pattern_efficientnet_b0.engine"
+PATTERN_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/pattern_best.engine"
 SOURCE_PATH = str(_ROOT / "scripts" / "RM_TestVideo.mp4")
 DEVICE = "0"
 SAVE_VIDEO = True
 SHOW_WINDOW = True
 MAX_SHOW_WIDTH = 1600
 MAX_FRAMES = 0  # 0 = 整段视频
+PATTERN_IMGSZ = 64
 # ===========================
 
 ImageU8 = NDArray[uint8]
@@ -67,11 +68,7 @@ class PatternNet(Protocol):
 
 
 class TrtPatternNet:
-    """batch=1 的 MobileNetV3 TensorRT 引擎。
-
-    导出脚本 tools/pattern_to_engine.py 把动态 batch 关掉了，所以这里按张 execute。
-    不要把多块装甲叠成一次 enqueue，engine 会拒。
-    """
+    """MobileNetV3 TensorRT。engine 静态 batch 由导出脚本决定，不足则零填充一次 enqueue。"""
 
     def __init__(self, engine_path: Path) -> None:
         import tensorrt as trt
@@ -86,21 +83,27 @@ class TrtPatternNet:
         names = [engine.get_tensor_name(i) for i in range(engine.num_io_tensors)]
         self._input = next(name for name in names if engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT)
         self._output = next(name for name in names if engine.get_tensor_mode(name) == trt.TensorIOMode.OUTPUT)
+        in_shape = tuple(int(dim) for dim in engine.get_tensor_shape(self._input))
+        out_shape = tuple(int(dim) for dim in engine.get_tensor_shape(self._output))
+        self._batch = max(1, int(in_shape[0]))
         self._stream = torch.cuda.Stream()
+        self._inp = torch.empty(in_shape, device="cuda", dtype=torch.float32)
+        self._out = torch.empty(out_shape, device="cuda", dtype=torch.float32)
 
     def __call__(self, batch: torch.Tensor) -> torch.Tensor:
         batch = batch.contiguous().to(device="cuda", dtype=torch.float32)
         outputs: list[torch.Tensor] = []
         stream = self._stream
-        for index in range(batch.shape[0]):
-            inp = batch[index : index + 1]
-            out = torch.empty((1, 6), device="cuda", dtype=torch.float32)
-            self._context.set_tensor_address(self._input, int(inp.data_ptr()))
-            self._context.set_tensor_address(self._output, int(out.data_ptr()))
+        for start in range(0, batch.shape[0], self._batch):
+            chunk = batch[start : start + self._batch]
+            self._inp.zero_()
+            self._inp[: chunk.shape[0]].copy_(chunk)
+            self._context.set_tensor_address(self._input, int(self._inp.data_ptr()))
+            self._context.set_tensor_address(self._output, int(self._out.data_ptr()))
             if not self._context.execute_async_v3(int(stream.cuda_stream)):
                 raise RuntimeError("pattern engine execute failed")
             stream.synchronize()
-            outputs.append(out)
+            outputs.append(self._out[: chunk.shape[0]].clone())
         return torch.cat(outputs, dim=0)
 
 
@@ -222,22 +225,22 @@ def _load_classifier() -> tuple[PatternNet, PatternTransform, torch.device]:
     else:
         path = first_existing(
             (
-                _ROOT / "weights" / "pattern_efficientnet_b0.engine",
-                _ROOT / "weights" / "pattern_efficientnet_b0.pth",
+                _ROOT / "weights" / "pattern_best.engine",
+                _ROOT / "weights" / "pattern_best.pth",
             )
         )
     if path.suffix.lower() == ".engine":
         device = _torch_device()
         print(f"pattern: {path}  device={device}")
-        return TrtPatternNet(path), val_transform(96), device
+        return TrtPatternNet(path), val_transform(PATTERN_IMGSZ), device
     device = torch.device("cpu")
     print(f"pattern: {path}  device={device} (pth fallback, CPU to avoid cuDNN vs TRT)")
-    net = build_classifier(PatternBackbone.EFFICIENTNET_B0, pretrained=False)
+    net = build_classifier(PatternBackbone.MOBILENET_V3_SMALL, pretrained=False)
     ckpt = torch.load(path, map_location=device, weights_only=False)
     net.load_state_dict(ckpt["model_state_dict"])
     net.to(device)
     net.eval()
-    return net, val_transform(96), device
+    return net, val_transform(PATTERN_IMGSZ), device
 
 
 def run_image(
@@ -252,7 +255,7 @@ def run_image(
         raise ImageReadError(source)
     warmup(detector, frame)
     with torch.no_grad():
-        net(torch.zeros(1, 3, 64, 64, device=device))
+        net(torch.zeros(1, 3, PATTERN_IMGSZ, PATTERN_IMGSZ, device=device))
     t0 = time.perf_counter()
     result = detector.infer(frame)
     elapsed = time.perf_counter() - t0
@@ -283,7 +286,7 @@ def run_video(
         raise ImageReadError(source)
     warmup(detector, first)
     with torch.no_grad():
-        net(torch.zeros(1, 3, 64, 64, device=device))
+        net(torch.zeros(1, 3, PATTERN_IMGSZ, PATTERN_IMGSZ, device=device))
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     writer: cv2.VideoWriter | None = None
