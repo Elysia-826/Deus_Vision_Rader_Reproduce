@@ -25,6 +25,13 @@ def test_missing_name_does_not_become_anonymous_xy() -> None:
     assert caught.value.key == "name"
 
 
+def test_infantry_suffix_is_three_not_serial() -> None:
+    robot = sim_robot_from_mapping(
+        {"name": "Robot_Infantry_Red_01", "team": "red", "x": 1, "y": 2, "z": 0.4}
+    )
+    assert robot.label == "R3"
+
+
 def test_unmapped_name_includes_the_original() -> None:
     with pytest.raises(UnmappedRobotName) as caught:
         sim_robot_from_mapping(

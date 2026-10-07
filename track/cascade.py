@@ -202,7 +202,9 @@ def _visible(slot: _Slot) -> bool:
             return True
         case TrackPhase.LOST:
             return slot.miss_count < COAST_FRAMES
-        case TrackPhase.INACTIVE | TrackPhase.TENTATIVE:
+        case TrackPhase.TENTATIVE:
+            return True
+        case TrackPhase.INACTIVE:
             return False
         case unreachable:
             assert_never(unreachable)
