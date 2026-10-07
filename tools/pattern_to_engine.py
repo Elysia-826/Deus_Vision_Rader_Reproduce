@@ -23,6 +23,7 @@ PT_PATH = str(_ROOT / "weights" / "pattern_best.pth")
 ENGINE_PATH = str(_ROOT / "weights" / "pattern_best.engine")
 ONNX_PATH = str(_ROOT / "weights" / "pattern_best.onnx")
 IMGSZ = 64
+BATCH = 8
 OPSET = 18
 # ===========================
 
@@ -36,7 +37,7 @@ def _load_net(pt_path: Path) -> MobileNetV3SmallClassifier:
 
 
 def _export_onnx(net: MobileNetV3SmallClassifier, onnx_path: Path) -> None:
-    dummy = torch.zeros(1, 3, IMGSZ, IMGSZ)
+    dummy = torch.zeros(BATCH, 3, IMGSZ, IMGSZ)
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
         net,
