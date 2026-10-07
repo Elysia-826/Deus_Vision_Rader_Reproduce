@@ -15,6 +15,17 @@ from detect.types import BBox
 ImageU8 = NDArray[uint8]
 
 
+def plausible_car_box(box: BBox) -> bool:
+    """丢掉太矮或细高的框。塔/能量机关常见 60px 高瘦条，真车在 1280 画布上更高更方。"""
+    if box.width < 16 or box.height < 40:
+        return False
+    if box.height / box.width > 2.5:
+        return False
+    if box.width / box.height > 3.0:
+        return False
+    return True
+
+
 def clamp_box(box: BBox, width: int, height: int) -> BBox | None:
     """把框裁进图像。完全在外或面积为 0 则没有可用 ROI。"""
     x1 = max(box.x1, 0)
