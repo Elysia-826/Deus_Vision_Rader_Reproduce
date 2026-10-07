@@ -1,6 +1,6 @@
 """全图车辆 YOLO → ROI 装甲 YOLO →（可选）图案分类。
 
-阈值抄港科大 params.yaml：车 conf 0.2 / 1280 / max_det 10；装甲 conf 0.3 / 192 / max_det 1。
+阈值：车 conf 0.45 / 1280 / max_det 10（仿真塔误检大约在 0.3）；装甲 conf 0.3 / 192 / max_det 1。
 车级开 BoT-SORT：雷达相机常俯仰扫场，ByteTrack 没有 GMC，全图一平移就集体换 ID。
 装甲级只用 predict：裁剪没有帧间连续性，persist 只会串 ID。
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, assert_never
 
-from detect.geometry import ImageU8, clamp_box, crop_roi, remap_box
+from detect.geometry import ImageU8, clamp_box, crop_roi, plausible_car_box, remap_box
 
 CAR_TRACKER_YAML: Path = Path(__file__).resolve().parent / "trackers" / "botsort.yaml"
 from detect.parse import detections_from_rows
@@ -91,7 +91,7 @@ def default_config(car_weights: str, armor_weights: str, device: str = "0") -> T
         armor_weights=armor_weights,
         car=StageInferConfig(
             imgsz=1280,
-            conf=0.2,
+            conf=0.45,
             iou=0.5,
             max_det=10,
             device=device,
@@ -136,7 +136,7 @@ class TwoStageDetector:
         crops: list[ImageU8] = []
         for car in self._run(self._car, frame, self._config.car, persist_tracks=persist_tracks):
             roi = clamp_box(car.box, width, height)
-            if roi is None:
+            if roi is None or not plausible_car_box(roi):
                 continue
             crops.append(crop_roi(frame, roi))
             kept.append(Detection(label=car.label, conf=car.conf, box=roi, track_id=car.track_id))
@@ -202,8 +202,16 @@ class TwoStageDetector:
         cfg: StageInferConfig,
         persist_tracks: bool,
     ) -> tuple[tuple[Detection, ...], ...]:
-        # armor_best.engine 是静态 batch=1，不能把多辆车 ROI 叠成一次 predict
-        return tuple(self._run(model, image, cfg, persist_tracks) for image in images)
+        results = model.predict(
+            images,
+            imgsz=cfg.imgsz,
+            conf=cfg.conf,
+            iou=cfg.iou,
+            max_det=cfg.max_det,
+            device=cfg.device,
+            verbose=False,
+        )
+        return tuple(_detections_from_result(item) for item in results)
 
 
 def _names_table(raw: dict[int, str] | list[str]) -> dict[int, str]:
