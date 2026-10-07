@@ -134,6 +134,25 @@ def test_with_device_only_changes_device() -> None:
     assert cpu.max_det == cfg.car.max_det
 
 
+def test_infer_drops_tall_false_car() -> None:
+    frame = np.zeros((80, 120, 3), dtype=np.uint8)
+    car_model = _ScriptedModel(
+        [
+            _FakeResult(
+                boxes=_FakeBoxes(
+                    xyxy=_FakeTensor([[10.0, 0.0, 30.0, 80.0]]),
+                    conf=_FakeTensor([0.9]),
+                    cls=_FakeTensor([0.0]),
+                ),
+                names={0: "robot"},
+            )
+        ]
+    )
+    armor_model = _ScriptedModel([])
+    detector = TwoStageDetector(default_config("car.pt", "armor.pt"), car_model, armor_model)
+    assert detector.infer(frame).robots == ()
+
+
 def test_infer_skips_empty_car_frame() -> None:
     frame = np.zeros((80, 120, 3), dtype=np.uint8)
     car_model = _ScriptedModel([_FakeResult(boxes=None, names={0: "robot"})])
