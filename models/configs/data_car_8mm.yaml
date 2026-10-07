@@ -1,0 +1,11 @@
+# 车辆检测。真实 car_yolo + 8 mm / 4096×3000 仿真。
+# 旧 1920×1080 仿真不进这套。推理仍是港科大的全图 1280，不改检测链。
+# path 相对本 yaml 所在目录（models/configs/）。
+
+path: ../../dataset/car_combined_8mm
+train: images/train
+val: images/val
+test: images/test
+nc: 1
+names:
+  0: robot
