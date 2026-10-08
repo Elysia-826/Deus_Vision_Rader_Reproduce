@@ -49,14 +49,14 @@ from models.pattern.transforms import val_transform  # noqa: E402
 # ========== 填这里 ==========
 CAR_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/car_best.engine"  # 空则按 car_best.engine / car_best.pt / car_last.pt 自动找
 ARMOR_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/armor_best.engine"  # 空则按 armor_best.engine / armor_best.pt 自动找
-PATTERN_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/pattern_best.engine"
+PATTERN_PATH = "C:/Users/YQS/Desktop/DEUS_VISION_RADER_TEST_reproduce/weights/pattern_efficientnet_b0.engine"
 SOURCE_PATH = str(_ROOT / "scripts" / "RM_TestVideo.mp4")
 DEVICE = "0"
 SAVE_VIDEO = True
 SHOW_WINDOW = True
 MAX_SHOW_WIDTH = 1600
 MAX_FRAMES = 0  # 0 = 整段视频
-PATTERN_IMGSZ = 64
+PATTERN_IMGSZ = 96
 # ===========================
 
 ImageU8 = NDArray[uint8]
@@ -225,8 +225,8 @@ def _load_classifier() -> tuple[PatternNet, PatternTransform, torch.device]:
     else:
         path = first_existing(
             (
-                _ROOT / "weights" / "pattern_best.engine",
-                _ROOT / "weights" / "pattern_best.pth",
+                _ROOT / "weights" / "pattern_efficientnet_b0.engine",
+                _ROOT / "weights" / "pattern_efficientnet_b0.pth",
             )
         )
     if path.suffix.lower() == ".engine":
@@ -235,7 +235,7 @@ def _load_classifier() -> tuple[PatternNet, PatternTransform, torch.device]:
         return TrtPatternNet(path), val_transform(PATTERN_IMGSZ), device
     device = torch.device("cpu")
     print(f"pattern: {path}  device={device} (pth fallback, CPU to avoid cuDNN vs TRT)")
-    net = build_classifier(PatternBackbone.MOBILENET_V3_SMALL, pretrained=False)
+    net = build_classifier(PatternBackbone.EFFICIENTNET_B0, pretrained=False)
     ckpt = torch.load(path, map_location=device, weights_only=False)
     net.load_state_dict(ckpt["model_state_dict"])
     net.to(device)
