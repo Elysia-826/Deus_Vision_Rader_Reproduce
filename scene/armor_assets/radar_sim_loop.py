@@ -7,6 +7,7 @@ GUI（持续画面，不要 --background）：
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 import traceback
@@ -183,6 +184,13 @@ def setup(camera_name: str) -> list[bpy.types.Object]:
         if hasattr(eevee, "taa_samples"):
             eevee.taa_samples = 1
     scene.camera = bpy.data.objects[camera_name]
+    # MV-CH120-60UC + 1.1" 8 mm。不依赖 blend 里上次保存的镜头，否则射线 K 对不上画面。
+    cam = scene.camera.data
+    cam.lens = 8.0
+    spot = bpy.data.objects.get("Radar_Coverage_Spot")
+    if spot is not None and cam.sensor_width > 0:
+        spot.data.spot_size = 2.0 * math.atan(cam.sensor_width / (2.0 * cam.lens))
+        print("radar lens", cam.lens, "fov_h_deg", round(math.degrees(spot.data.spot_size), 2), flush=True)
     col = bpy.data.collections.get("radar_viz")
     if col is not None:
         col.hide_render = True

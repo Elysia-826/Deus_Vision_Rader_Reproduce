@@ -55,6 +55,7 @@ DEVICE = "0"
 SAVE_VIDEO = True
 SHOW_WINDOW = True
 MAX_SHOW_WIDTH = 1600
+MAX_SHOW_HEIGHT = 860
 MAX_FRAMES = 0  # 0 = 整段视频
 PATTERN_IMGSZ = 64
 # ===========================
@@ -174,11 +175,11 @@ def draw_result(frame: ImageU8, result: FrameResult, fps: float) -> ImageU8:
 
 
 def _scale(frame: ImageU8) -> ImageU8:
-    width = frame.shape[1]
-    if width <= MAX_SHOW_WIDTH:
+    height, width = frame.shape[:2]
+    scale = min(MAX_SHOW_WIDTH / width, MAX_SHOW_HEIGHT / height, 1.0)
+    if scale >= 1.0:
         return frame
-    scale = MAX_SHOW_WIDTH / width
-    return cv2.resize(frame, (MAX_SHOW_WIDTH, int(frame.shape[0] * scale)))
+    return cv2.resize(frame, (int(width * scale), int(height * scale)))
 
 
 def _resolve_car(model_dir: Path) -> Path:
