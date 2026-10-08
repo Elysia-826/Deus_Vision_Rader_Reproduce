@@ -1,10 +1,15 @@
 # Deus Vision Radar Reproduce
 
-港科大 ENTERPRIZE [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm) 单目雷达复现。骨干 YOLOv12 → YOLO26，图案 MobileNet-V2 → MobileNetV3-Small。
+港科大 ENTERPRIZE [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm) 单目雷达复现。骨干 YOLOv12 → YOLO26。当前在 `main`，图案是 MobileNetV3-Small @ 64。
 
 当前能跑：车辆 YOLO → 装甲 YOLO → 图案分类；仿真射线定位或上场四点单应；相机画面内嵌小地图。
 
 操作步骤见 [docs/radar_operation.md](docs/radar_operation.md)。
+
+## 分支
+
+- `main`：上场图案是 MobileNetV3-Small @ 64，权重 `weights/pattern_best.engine`。
+- `pattern-efficientnet-b0`：图案对照实验，EfficientNet-B0 @ 96，权重 `weights/pattern_efficientnet_b0.engine`。检测链其余部分与 main 相同。
 
 还没做：mesh 射线、级联跟踪、海康拉流、裁判串口。
 
@@ -29,7 +34,7 @@ scene/             RMUC2026 Blender 仿真（CAD/贴图不进 git）
 |---|---|---|
 | 车检测 | YOLOv12-s @ 1280 | YOLO26s @ 1280 |
 | 装甲检测 | YOLOv12-n @ 192 | YOLO26n @ 192 |
-| 图案 | MobileNet-V2，带颜色 | MobileNetV3-Small，6 类 `(1,2,3,4,S,Q)` |
+| 图案 | MobileNet-V2，带颜色 | `main`：MobileNetV3-Small @ 64；`pattern-efficientnet-b0`：EfficientNet-B0 @ 96。都是 6 类 `(1,2,3,4,S,Q)` |
 | 上场定位 | 像素射线打场地 mesh | 仿真射线；真机四点地标单应 |
 
 ## 命令（仓库根目录）

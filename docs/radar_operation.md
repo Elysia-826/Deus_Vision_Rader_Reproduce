@@ -128,7 +128,7 @@ LOCATE_MODE = "homography"
 1. 先 `SOURCE = "video"`，用赛场录像把检测和单应跑通
 2. 标定 `match_homography.json`
 3. 海康 RTSP 接上后，用 `cv2.VideoCapture(rtsp_url)` 替换图源，检测/小地图不用改
-4. 分辨率必须和标定时那一帧一致（当前按 1920×1080）
+4. 分辨率必须和标定时那一帧一致（当前相机 MV-CH120-60UC + 8 mm，4096×3000）
 
 俯视图四角 `locate/calib/minimap.json` 在场地还是 28×15 时不用重做。
 
