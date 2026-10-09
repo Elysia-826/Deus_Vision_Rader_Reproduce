@@ -29,6 +29,7 @@ sys.path.insert(0, str(_SCRIPTS))
 import visualize_minimap as vis_map  # noqa: E402
 import visualize_two_stage as vis2  # noqa: E402
 from locate.camera import camera_from_path  # noqa: E402
+from locate.ray_mesh import FieldMesh  # noqa: E402
 from locate.errors import SourceNotReadyError  # noqa: E402
 from locate.homography import HomographyMap, homography_from_path  # noqa: E402
 from locate.minimap import minimap_from_path  # noqa: E402
@@ -46,6 +47,7 @@ SOURCE = "blender"  # blender | video | hik
 LOCATE_MODE = "ray"  # ray | homography
 VIDEO_PATH = str(_ROOT / "scripts" / "RM_TestVideo.mp4")
 CAMERA_JSON = _ROOT / "locate" / "calib" / "Camera_Radar_Blue.json"
+FIELD_MESH = _ROOT / "locate" / "calib" / "field_mesh.npz"
 HOMOGRAPHY_JSON = _ROOT / "locate" / "calib" / "match_homography.json"
 MINIMAP_JSON = _ROOT / "locate" / "calib" / "minimap.json"
 MINIMAP_IMAGE = _ROOT / "scene" / "materials" / "rmuc_fig4_1_topdown.png"
@@ -190,10 +192,14 @@ def main() -> None:
 
     pose = None
     homography: HomographyMap | None = None
+    mesh: FieldMesh | None = None
     if LOCATE_MODE == "homography":
         homography = homography_from_path(HOMOGRAPHY_JSON)
     else:
         pose = camera_from_path(CAMERA_JSON)
+        if FIELD_MESH.is_file():
+            mesh = FieldMesh.from_npz(FIELD_MESH)
+            print("run_radar mesh", FIELD_MESH.name, flush=True)
     calib = minimap_from_path(MINIMAP_JSON)
     minimap = cv2.imread(str(MINIMAP_IMAGE))
     if minimap is None:
@@ -249,7 +255,7 @@ def main() -> None:
         now = time.perf_counter()
         dt_s = 0.1 if last_tick is None else max(now - last_tick, 1e-3)
         last_tick = now
-        publishes = tracker.step(observations_from_result(result, pose, homography), dt_s)
+        publishes = tracker.step(observations_from_result(result, pose, homography, mesh), dt_s)
         if source is FrameSource.BLENDER:
             append_frame(IDENTITY_LOG, last_frame, truth, publishes)
         vis = overlay(frame, result, calib, minimap, truth, publishes, trails, fps)

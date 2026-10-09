@@ -8,6 +8,7 @@ from detect.types import FrameResult, LinkedRobot
 from locate.camera import CameraPose
 from locate.field import FIELD_X_MAX, FIELD_X_MIN, FIELD_Y_MAX, FIELD_Y_MIN
 from locate.homography import HomographyMap
+from locate.ray_mesh import FieldMesh
 from locate.ray_plane import foot_pixel, pixel_to_ground
 from locate.types import FieldXY, Pixel
 from track.types import FieldObservation, Role, Team
@@ -28,12 +29,13 @@ def observations_from_result(
     result: FrameResult,
     pose: CameraPose | None,
     homography: HomographyMap | None,
+    mesh: FieldMesh | None = None,
 ) -> tuple[FieldObservation, ...]:
-    """底边像素走现有定位。单应优先，和 run_radar 原来的开关一致，这里不改标定。"""
+    """底边像素走现有定位。单应优先；否则打场地网格，没有网格才退回 z=0。"""
     found: list[FieldObservation] = []
     for robot in result.robots:
         pixel = foot_pixel(robot.car.box)
-        hit = _to_field(pixel, pose, homography)
+        hit = _to_field(pixel, pose, homography, mesh)
         if hit is None or not _on_field(hit):
             continue
         team, role, conf = _appearance(robot)
@@ -50,11 +52,18 @@ def observations_from_result(
     return tuple(found)
 
 
-def _to_field(pixel: Pixel, pose: CameraPose | None, homography: HomographyMap | None) -> FieldXY | None:
+def _to_field(
+    pixel: Pixel,
+    pose: CameraPose | None,
+    homography: HomographyMap | None,
+    mesh: FieldMesh | None = None,
+) -> FieldXY | None:
     if homography is not None:
         return homography.pixel_to_field(pixel)
     if pose is None:
         return None
+    if mesh is not None:
+        return mesh.pixel_to_field(pose, pixel)
     return pixel_to_ground(pose, pixel)
 
 
