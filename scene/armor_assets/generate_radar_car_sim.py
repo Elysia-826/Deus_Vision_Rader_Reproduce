@@ -117,6 +117,14 @@ def yolo_box(ob: bpy.types.Object, cam: bpy.types.Object, scene: bpy.types.Scene
         return None
     x0, x1 = max(0.0, min(xs)), min(1.0, max(xs))
     y0, y1 = max(0.0, min(ys)), min(1.0, max(ys))
+    # 包围盒最低角经常是车顶远边，不是轮子。下边拉到该车地面触地点的投影。
+    loc = ob.matrix_world.translation
+    z = ground_z(float(loc.x), float(loc.y))
+    if z is None:
+        z = float(loc.z)
+    foot = world_to_camera_view(scene, cam, Vector((float(loc.x), float(loc.y), z)))
+    if foot.z > 0.05:
+        y1 = max(y1, min(1.0, 1.0 - float(foot.y)))
     width, height = x1 - x0, y1 - y0
     if width < MIN_BOX or height < MIN_BOX:
         return None
