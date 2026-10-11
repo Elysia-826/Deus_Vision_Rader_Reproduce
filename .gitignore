@@ -265,6 +265,9 @@ __marimo__/
 *.STL
 *.blend
 *.blend1
+*.blend.bak
+# Blender 生成的场地/机器人规格文档（bake_radar_fov_docs 副产物）
+scene/armor_assets/docs/
 
 # Serialized dumps (not source)
 *.pkl
