@@ -93,7 +93,6 @@ class TrtDetectModel:  # noqa: MUTABLE_OK — 持有 engine context、stream 和
         self._size = int(in_shape[2])
         self._half = engine.get_tensor_dtype(self._input) == trt.DataType.HALF
         self._names = _class_names(meta)
-        self._stream = torch.cuda.Stream()
         dtype = torch.float16 if self._half else torch.float32
         self._inp = torch.empty((self._batch, 3, self._size, self._size), device="cuda", dtype=dtype)
         self._out = torch.empty(out_shape, device="cuda", dtype=torch.float32)
@@ -197,9 +196,13 @@ class TrtDetectModel:  # noqa: MUTABLE_OK — 持有 engine context、stream 和
             self._inp.copy_(rgb.to(dtype=self._inp.dtype).div_(255))
             self._context.set_tensor_address(self._input, int(self._inp.data_ptr()))
             self._context.set_tensor_address(self._output, int(self._out.data_ptr()))
-            if not self._context.execute_async_v3(int(self._stream.cuda_stream)):
+            # 全部走当前（默认）流：copy_/execute/读回天然全序。
+            # 之前 execute 提交到自建流、拷贝在默认流，两个流无事件依赖，
+            # GPU 乱序执行会偶发读到旧输入（同图推理结果随机翻转）。
+            stream = torch.cuda.current_stream()
+            if not self._context.execute_async_v3(int(stream.cuda_stream)):
                 raise EngineLoadError(Path(self._input), "execute_async_v3 failed")
-            self._stream.synchronize()
+            stream.synchronize()
             raw = self._out.detach().cpu().numpy().copy()
             for index, pad in enumerate(pads):
                 rows = raw[index]

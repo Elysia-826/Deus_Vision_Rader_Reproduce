@@ -87,14 +87,16 @@ class TrtPatternNet:
         in_shape = tuple(int(dim) for dim in engine.get_tensor_shape(self._input))
         out_shape = tuple(int(dim) for dim in engine.get_tensor_shape(self._output))
         self._batch = max(1, int(in_shape[0]))
-        self._stream = torch.cuda.Stream()
         self._inp = torch.empty(in_shape, device="cuda", dtype=torch.float32)
         self._out = torch.empty(out_shape, device="cuda", dtype=torch.float32)
 
     def __call__(self, batch: torch.Tensor) -> torch.Tensor:
         batch = batch.contiguous().to(device="cuda", dtype=torch.float32)
         outputs: list[torch.Tensor] = []
-        stream = self._stream
+        # 全部走当前（默认）流：zero_/copy_/execute/读回天然全序。
+        # 之前 execute 提交到自建流、拷贝在默认流，两个流无事件依赖，
+        # GPU 乱序执行会偶发读到旧输入（同图推理结果随机翻转）。
+        stream = torch.cuda.current_stream()
         for start in range(0, batch.shape[0], self._batch):
             chunk = batch[start : start + self._batch]
             self._inp.zero_()
