@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Final, assert_never
 
@@ -11,7 +13,9 @@ from track.types import (
     FieldObservation,
     PatternStatus,
     PublishedTrack,
+    Role,
     SlotId,
+    Team,
     TrackPhase,
     all_slots,
 )
@@ -25,6 +29,27 @@ BOT_BONUS: Final = 0.8
 PATTERN_BONUS: Final = 0.2
 PATTERN_PENALTY: Final = 0.35
 TEAM_PENALTY: Final = 0.5
+# 身份时序聚合（港科大 type.py 同思路）：每槽记最近 30 帧的灯队/兵种票，
+# 取最近 10 帧指数加权（τ=0.5）出分布。小陀螺下单帧 dead/错标翻不动已确认槽。
+_HIST_LEN: Final = 30
+_HIST_WINDOW: Final = 10
+_HIST_TAU: Final = 0.5
+
+
+def _weighted_argmax(hist: deque) -> tuple[object | None, float]:
+    """最近 _HIST_WINDOW 帧的指数加权众数 + 归一化得分。空历史返回 (None, 0)。"""
+    recent = list(hist)[-_HIST_WINDOW:]
+    if not recent:
+        return None, 0.0
+    n = len(recent)
+    scores: dict[object, float] = {}
+    total = 0.0
+    for i, value in enumerate(recent):
+        weight = math.exp(-_HIST_TAU * (n - 1 - i))
+        scores[value] = scores.get(value, 0.0) + weight
+        total += weight
+    best = max(scores, key=lambda k: scores[k])
+    return best, scores[best] / total
 
 
 @dataclass(slots=True)  # noqa: MUTABLE_OK — 状态机和滤波器跨帧原地更新
@@ -39,6 +64,8 @@ class _Slot:
     last_x: float = 0.0
     last_y: float = 0.0
     filt: PlanarKalman = field(default_factory=PlanarKalman)
+    team_hist: deque[Team] = field(default_factory=lambda: deque(maxlen=_HIST_LEN))
+    role_hist: deque[Role] = field(default_factory=lambda: deque(maxlen=_HIST_LEN))
 
 
 class CascadeMatchTracker:
@@ -79,7 +106,12 @@ class CascadeMatchTracker:
         return min_cost_pairs(cost)
 
     def _absorb(self, slot: _Slot, obs: FieldObservation, dt_s: float) -> None:
-        status = pattern_status(slot.slot, obs)
+        status = pattern_status(slot, obs)
+        # 本帧观测先成为该槽的历史票，再走状态机；pattern_status 查的是投票前分布。
+        if obs.team is not None:
+            slot.team_hist.append(obs.team)
+        if obs.role is not None:
+            slot.role_hist.append(obs.role)
         match slot.phase:
             case TrackPhase.INACTIVE:
                 slot.phase = TrackPhase.TENTATIVE
@@ -139,16 +171,25 @@ class CascadeMatchTracker:
         return tuple(published)
 
 
-def pattern_status(slot: SlotId, obs: FieldObservation) -> PatternStatus:
-    if obs.team is None or obs.role is None:
+def pattern_status(slot: _Slot, obs: FieldObservation) -> PatternStatus:
+    """槽的当前身份 = 历史分布；新槽无历史时退化为单帧观测。
+
+    小陀螺下单帧 dead/错标不会翻案已确认槽；持续的新身份会随指数加权
+    慢慢成为众数，槽判定随之翻转（车确实换了）。
+    """
+    team, _ = _weighted_argmax(slot.team_hist)
+    role, _ = _weighted_argmax(slot.role_hist)
+    if team is None or role is None:
+        team, role = obs.team, obs.role
+    if team is None or role is None:
         return PatternStatus.ABSENT
-    if obs.team is slot.team and obs.role is slot.role:
+    if team is slot.slot.team and role is slot.slot.role:
         return PatternStatus.AGREE
     return PatternStatus.CONFLICT
 
 
 def _pair_cost(slot: _Slot, obs: FieldObservation) -> float:
-    status = pattern_status(slot.slot, obs)
+    status = pattern_status(slot, obs)
     match slot.phase:
         case TrackPhase.INACTIVE:
             if status is not PatternStatus.AGREE or obs.pattern_conf < BIRTH_CONF:
@@ -231,3 +272,5 @@ def _deactivate(slot: _Slot) -> None:
     slot.rebind_streak = 0
     slot.seen = False
     slot.filt = PlanarKalman()
+    slot.team_hist.clear()
+    slot.role_hist.clear()
