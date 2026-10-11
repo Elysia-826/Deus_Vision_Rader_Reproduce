@@ -1,7 +1,8 @@
-"""Blender live video source. --motion off|patrol  --camera Camera_Radar_Blue
+"""Blender live video source. --motion off|patrol  --camera Camera_Radar_Blue|Camera_Radar_Red|alternate
 
 GUI（持续画面，不要 --background）：
     blender.exe scene/RMUC2026_V2.0.0_radar.blend --python scene/armor_assets/radar_sim_loop.py -- --motion patrol
+数据采集（双相机轮换）加 --camera alternate。
 """
 
 from __future__ import annotations
@@ -127,6 +128,31 @@ def set_world_xyz(ob: bpy.types.Object, x: float, y: float, z: float) -> None:
     ob.matrix_world = world
 
 
+def face_travel(ob: bpy.types.Object, old_x: float, old_y: float, want_x: float, want_y: float) -> None:
+    """车头跟速度方向。装甲板在车身左右（对称），±90° 两种取向露板等价。
+    板轴从 armor_left/right 子 mesh 的本地位置算，和出厂 yaw 无关。"""
+    dx, dy = want_x - old_x, want_y - old_y
+    if dx * dx + dy * dy < 1e-6:
+        return
+    left = right = None
+    stack = list(ob.children)
+    while stack:
+        child = stack.pop()
+        if child.type == "MESH":
+            if child.name.endswith("armor_left"):
+                left = child
+            elif child.name.endswith("armor_right"):
+                right = child
+        stack.extend(child.children)
+    if left is None or right is None:
+        return
+    heading = math.atan2(dy, dx)
+    local = math.atan2(
+        right.location.y - left.location.y, right.location.x - left.location.x
+    )
+    ob.rotation_euler.z = heading + math.pi / 2.0 - local
+
+
 def ground_z(x: float, y: float) -> float | None:
     depsgraph = bpy.context.evaluated_depsgraph_get()
     origin = Vector((x, y, 30.0))
@@ -183,14 +209,16 @@ def setup(camera_name: str) -> list[bpy.types.Object]:
             eevee.taa_render_samples = 1
         if hasattr(eevee, "taa_samples"):
             eevee.taa_samples = 1
-    scene.camera = bpy.data.objects[camera_name]
-    # MV-CH120-60UC + 1.1" 8 mm。不依赖 blend 里上次保存的镜头，否则射线 K 对不上画面。
-    cam = scene.camera.data
-    cam.lens = 8.0
-    spot = bpy.data.objects.get("Radar_Coverage_Spot")
-    if spot is not None and cam.sensor_width > 0:
-        spot.data.spot_size = 2.0 * math.atan(cam.sensor_width / (2.0 * cam.lens))
-        print("radar lens", cam.lens, "fov_h_deg", round(math.degrees(spot.data.spot_size), 2), flush=True)
+    names = list(_CAMS) if camera_name == "alternate" else [camera_name]
+    for name in names:
+        scene.camera = bpy.data.objects[name]
+        # MV-CH120-60UC + 1.1" 8 mm。不依赖 blend 里上次保存的镜头，否则射线 K 对不上画面。
+        cam = scene.camera.data
+        cam.lens = 8.0
+        spot = bpy.data.objects.get("Radar_Coverage_Spot")
+        if spot is not None and cam.sensor_width > 0:
+            spot.data.spot_size = 2.0 * math.atan(cam.sensor_width / (2.0 * cam.lens))
+            print("radar lens", cam.lens, "fov_h_deg", round(math.degrees(spot.data.spot_size), 2), flush=True)
     col = bpy.data.collections.get("radar_viz")
     if col is not None:
         col.hide_render = True
@@ -229,7 +257,10 @@ def place(chosen: list[bpy.types.Object], motion: str, t: float) -> list[dict[st
         z = ground_z(want_x, want_y)
         if z is None:
             want_x, want_y, z = old.x, old.y, old.z
+        # 顺序关键：先写位置再改朝向。set_world_xyz 里 matrix_world 写回
+        # 会用 depsgraph 里的旧旋转覆盖 rotation_euler——朝向放在它后面才生效。
         set_world_xyz(ob, want_x, want_y, z)
+        face_travel(ob, old.x, old.y, want_x, want_y)
         placed.append((want_x, want_y))
     bpy.context.view_layer.update()
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -326,12 +357,16 @@ _MAX_FRAMES = 0
 _T0 = 0.0
 _FRAME = 0
 _CHOSEN: list[bpy.types.Object] = []
+# 双相机数据采集时传 --camera alternate，按帧轮换蓝/红。展示用默认单蓝相机。
+_CAMS = ("Camera_Radar_Blue", "Camera_Radar_Red")
 
 
 def _tick() -> float | None:
     global _FRAME
+    cam = _CAMERA if _CAMERA != "alternate" else _CAMS[_FRAME % len(_CAMS)]
+    bpy.context.scene.camera = bpy.data.objects[cam]
     records = place(_CHOSEN, _MOTION, time.time() - _T0)
-    render_live(_FRAME, _CAMERA, records)
+    render_live(_FRAME, cam, records)
     print("frame", _FRAME, flush=True)
     _FRAME += 1
     if _MAX_FRAMES > 0 and _FRAME >= _MAX_FRAMES:

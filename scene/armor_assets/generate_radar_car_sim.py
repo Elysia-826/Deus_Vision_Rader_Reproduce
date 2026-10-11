@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import json
+import math
 import random
 import sys
 from pathlib import Path
@@ -42,11 +44,13 @@ def argv_after_double_dash() -> list[str]:
     return sys.argv[sys.argv.index("--") + 1 :]
 
 
-def parse_cli() -> tuple[Path, int, int, str]:
+def parse_cli() -> tuple[Path, int, int, str, float, float]:
     out = Path(r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\dataset\car_sim")
     count = 1000
     seed = 42
     motion = "random"
+    dt = PATROL_DT
+    spin = 0.0
     args = argv_after_double_dash()
     i = 0
     while i < len(args):
@@ -63,11 +67,17 @@ def parse_cli() -> tuple[Path, int, int, str]:
             case "--motion":
                 motion = args[i + 1]
                 i += 2
+            case "--dt":
+                dt = float(args[i + 1])
+                i += 2
+            case "--spin":
+                spin = float(args[i + 1])
+                i += 2
             case unreachable:
                 raise SystemExit(f"unknown arg: {unreachable}")
     if motion not in {"random", "patrol"}:
         raise SystemExit(f"bad --motion {motion}")
-    return out, count, seed, motion
+    return out, count, seed, motion, dt, spin
 
 
 def root_robots() -> list[bpy.types.Object]:
@@ -176,6 +186,31 @@ def set_world_xyz(ob: bpy.types.Object, x: float, y: float, z: float) -> None:
     ob.matrix_world = world
 
 
+def face_travel(ob: bpy.types.Object, old_x: float, old_y: float, want_x: float, want_y: float) -> None:
+    """车头跟速度方向。装甲板在车身左右（对称），±90° 两种取向露板等价。
+    板轴从 armor_left/right 子 mesh 的本地位置算，和出厂 yaw 无关。"""
+    dx, dy = want_x - old_x, want_y - old_y
+    if dx * dx + dy * dy < 1e-6:
+        return
+    left = right = None
+    stack = list(ob.children)
+    while stack:
+        child = stack.pop()
+        if child.type == "MESH":
+            if child.name.endswith("armor_left"):
+                left = child
+            elif child.name.endswith("armor_right"):
+                right = child
+        stack.extend(child.children)
+    if left is None or right is None:
+        return
+    heading = math.atan2(dy, dx)
+    local = math.atan2(
+        right.location.y - left.location.y, right.location.x - left.location.x
+    )
+    ob.rotation_euler.z = heading + math.pi / 2.0 - local
+
+
 def ground_z(x: float, y: float) -> float | None:
     depsgraph = bpy.context.evaluated_depsgraph_get()
     origin = Vector((x, y, 30.0))
@@ -216,7 +251,7 @@ def wall_blocks(x0: float, y0: float, x1: float, y1: float, z: float) -> bool:
     return False
 
 
-def place_patrol(chosen: list[bpy.types.Object], t: float) -> None:
+def place_patrol(chosen: list[bpy.types.Object], t: float, spin: float = 0.0) -> None:
     placed: list[tuple[float, float]] = []
     for i, ob in enumerate(chosen):
         old = ob.matrix_world.to_translation()
@@ -229,7 +264,12 @@ def place_patrol(chosen: list[bpy.types.Object], t: float) -> None:
         z = ground_z(want_x, want_y)
         if z is None:
             want_x, want_y, z = old.x, old.y, old.z
+        # 顺序关键：先写位置再改朝向。set_world_xyz 里 matrix_world 写回
+        # 会用 depsgraph 里的旧旋转覆盖 rotation_euler——朝向放在它后面才生效。
         set_world_xyz(ob, want_x, want_y, z)
+        face_travel(ob, old.x, old.y, want_x, want_y)
+        # 小陀螺：朝向叠加匀速自转，相位用巡逻时间保证帧间连续。
+        ob.rotation_euler.z += spin * t
         placed.append((want_x, want_y))
 
 
@@ -305,7 +345,27 @@ def write_label(path: Path, boxes: list[tuple[float, float, float, float]]) -> N
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def render_one(index: int, out_dir: Path, robots: list[bpy.types.Object], rng: random.Random) -> bool:
+def write_meta(path: Path, index: int, cam_name: str, dt: float, robots: list[bpy.types.Object]) -> None:
+    """每帧真值 sidecar，给离线视频流打分用。键和 live_meta.json 一致。"""
+    records = []
+    for ob in robots:
+        loc = ob.matrix_world.translation
+        records.append(
+            {
+                "name": ob.name,
+                "team": team_of(ob.name),
+                "x": float(loc.x),
+                "y": float(loc.y),
+                "z": float(loc.z),
+            }
+        )
+    path.write_text(
+        json.dumps({"frame": index, "camera": cam_name, "dt": dt, "robots": records}),
+        encoding="utf-8",
+    )
+
+
+def render_one(index: int, out_dir: Path, robots: list[bpy.types.Object], rng: random.Random, dt: float) -> bool:
     scene = bpy.context.scene
     cam_name = CAMS[index % 2]
     cam = bpy.data.objects[cam_name]
@@ -331,6 +391,7 @@ def render_one(index: int, out_dir: Path, robots: list[bpy.types.Object], rng: r
     scene.render.filepath = str(out_dir / f"{stem}.jpg")
     bpy.ops.render.render(write_still=True)
     write_label(out_dir / f"{stem}.txt", boxes)
+    write_meta(out_dir / f"{stem}.json", index, cam_name, dt, chosen)
     return True
 
 
@@ -345,11 +406,11 @@ def visible_boxes(
     return boxes
 
 
-def render_patrol(index: int, out_dir: Path, chosen: list[bpy.types.Object], t: float) -> bool:
+def render_patrol(index: int, out_dir: Path, chosen: list[bpy.types.Object], t: float, dt: float, spin: float = 0.0) -> bool:
     scene = bpy.context.scene
     cam = bpy.data.objects[CAMS[index % 2]]
     scene.camera = cam
-    place_patrol(chosen, t)
+    place_patrol(chosen, t, spin)
     bpy.context.view_layer.update()
     boxes = visible_boxes(chosen, cam, scene)
     if not boxes:
@@ -358,11 +419,12 @@ def render_patrol(index: int, out_dir: Path, chosen: list[bpy.types.Object], t: 
     scene.render.filepath = str(out_dir / f"{stem}.jpg")
     bpy.ops.render.render(write_still=True)
     write_label(out_dir / f"{stem}.txt", boxes)
+    write_meta(out_dir / f"{stem}.json", index, cam.name, dt, chosen)
     return True
 
 
 def main() -> None:
-    out_dir, count, seed, motion = parse_cli()
+    out_dir, count, seed, motion, dt, spin = parse_cli()
     out_dir.mkdir(parents=True, exist_ok=True)
     prepare_scene()
     robots = root_robots()
@@ -382,10 +444,10 @@ def main() -> None:
             if attempts > count * 20:
                 raise RuntimeError(f"too many retries ({attempts}) after {kept} frames")
             if motion == "patrol":
-                patrol_t += PATROL_DT
-                ok = render_patrol(kept, out_dir, patrol, patrol_t)
+                patrol_t += dt
+                ok = render_patrol(kept, out_dir, patrol, patrol_t, dt, spin)
             else:
-                ok = render_one(kept, out_dir, robots, rng)
+                ok = render_one(kept, out_dir, robots, rng, dt)
             if ok:
                 kept += 1
                 if kept % 10 == 0 or kept == count:
