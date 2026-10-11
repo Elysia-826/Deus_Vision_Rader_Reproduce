@@ -2,7 +2,7 @@
 
 港科大 ENTERPRIZE [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm) 单目雷达复现。骨干 YOLOv12 → YOLO26。当前在 `main`，图案是 MobileNetV3-Small @ 64。
 
-当前能跑：车辆 YOLO → 装甲 YOLO → 图案分类；仿真射线定位或上场四点单应；相机画面内嵌小地图。
+当前能跑：车辆 YOLO → 装甲 YOLO → 图案分类；仿真射线定位或上场四点单应；相机画面内嵌小地图；固定兵种槽级联跟踪（身份历史投票 + 转弯自适应过程噪声）。
 
 操作步骤见 [docs/radar_operation.md](docs/radar_operation.md)。
 
@@ -11,7 +11,7 @@
 - `main`：上场图案是 MobileNetV3-Small @ 64，权重 `weights/pattern_best.engine`。
 - `pattern-efficientnet-b0`：图案对照实验，EfficientNet-B0 @ 96，权重 `weights/pattern_efficientnet_b0.engine`。检测链其余部分与 main 相同。
 
-还没做：mesh 射线、级联跟踪、海康拉流、裁判串口。
+还没做：海康拉流、裁判串口。
 
 ## 目录
 
@@ -48,6 +48,16 @@ python scripts/run_radar.py
 python scripts/calibrate_landmarks.py
 pytest
 ```
+
+打分（验收与回归）：
+
+```bash
+python scripts/eval_foot_ray.py --weights <best.pt>     # 新车权重 1.2 m 底边射线验收
+python scripts/score_identity_log.py [log.jsonl]        # 发布点 vs 真值：召回/误差/野点
+python scripts/score_stage_funnel.py                    # GT→车→装甲→图案 分级漏斗
+```
+
+基准视频流：`generate_radar_car_sim.py --motion patrol --dt 0.1 [--spin 6.0]` 渲染 10 Hz 固定步长序列（每帧带真值 json），`run_radar.py` 用 `RADAR_SOURCE=images RADAR_HEADLESS=1 RADAR_IMAGES_DIR=... RADAR_IDENTITY_LOG=...` 离线回放打分。同一份序列两次运行逐字节一致。
 
 Windows 仿真：
 
