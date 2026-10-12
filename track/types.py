@@ -73,7 +73,10 @@ class FieldObservation:
 
 @dataclass(frozen=True, slots=True)
 class PublishedTrack:
-    """这一帧要画到小地图上的槽。LOST 仍发布，表示正在外推。"""
+    """这一帧要画到小地图上的槽。LOST 仍发布，表示正在外推。
+
+    vx/vy 是卡尔曼速度（米/秒），猜点/裁判质量门用；默认 0 保持旧调用兼容。
+    """
 
     label: str
     team: Team
@@ -81,6 +84,8 @@ class PublishedTrack:
     y: float
     phase: TrackPhase
     bot_id: int | None
+    vx: float = 0.0
+    vy: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
