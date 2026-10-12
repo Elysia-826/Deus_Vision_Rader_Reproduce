@@ -31,9 +31,15 @@ def observations_from_result(
     homography: HomographyMap | None,
     mesh: FieldMesh | None = None,
 ) -> tuple[FieldObservation, ...]:
-    """底边像素走现有定位。单应优先；否则打场地网格，没有网格才退回 z=0。"""
+    """底边像素乘现成定位。单应优先；否则打场地网格，没有网格退回 z=0。
+
+    死亡门：装甲全 dead 的车不产观测——死了的车不该继续喂槽，
+    槽转 LOST 后按既有语义自然停发（0.5s 内）。没检出装甲的车照旧。
+    """
     found: list[FieldObservation] = []
     for robot in result.robots:
+        if robot.armors and all(armor.label == "dead" for armor in robot.armors):
+            continue
         pixel = foot_pixel(robot.car.box)
         hit = _to_field(pixel, pose, homography, mesh)
         if hit is None or not _on_field(hit):

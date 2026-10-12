@@ -1,9 +1,23 @@
 from __future__ import annotations
 
-from detect.types import BBox, Detection, LinkedRobot, PatternPred
-from locate.types import FieldXY
-from track.observe import _appearance, _on_field
+from detect.types import BBox, Detection, FrameResult, LinkedRobot, PatternPred
+from locate.field import FIELD_X_MAX, FIELD_X_MIN, FIELD_Y_MAX, FIELD_Y_MIN
+from locate.homography import homography_from_pairs
+from locate.types import FieldXY, Pixel
+from track.observe import _appearance, _on_field, observations_from_result
 from track.types import Role, Team
+
+
+def _homography():
+    """任意一个可用的单应：像素四角 → 场地四角，够把底边映进场内。"""
+    pixels = (Pixel(0, 0), Pixel(280, 0), Pixel(280, 150), Pixel(0, 150))
+    fields = (
+        FieldXY(FIELD_X_MIN, FIELD_Y_MAX),
+        FieldXY(FIELD_X_MAX, FIELD_Y_MAX),
+        FieldXY(FIELD_X_MAX, FIELD_Y_MIN),
+        FieldXY(FIELD_X_MIN, FIELD_Y_MIN),
+    )
+    return homography_from_pairs(pixels, fields, ("tl", "tr", "br", "bl"))
 
 
 def test_on_field_rejects_exploded_ray() -> None:
@@ -40,3 +54,36 @@ def test_only_dead_armor_has_no_team() -> None:
     assert team is None
     assert role is Role.SENTRY
     assert conf > 0.8
+
+
+def _car(box: tuple[int, int, int, int], armors: tuple[Detection, ...]) -> LinkedRobot:
+    return LinkedRobot(
+        car=Detection(label="robot", conf=0.9, box=BBox(*box)), armors=armors
+    )
+
+
+def _live_armor(label: str = "red") -> Detection:
+    return Detection(label=label, conf=0.8, box=BBox(10, 10, 20, 20), pattern=PatternPred(name="3", conf=0.8))
+
+
+def _dead_armor() -> Detection:
+    return Detection(label="dead", conf=0.8, box=BBox(10, 10, 20, 20), pattern=PatternPred(name="3", conf=0.8))
+
+
+def test_all_dead_armors_drop_the_observation() -> None:
+    """死亡门：装甲全 dead 的车不产观测，死了的车不再喂槽。"""
+    result = FrameResult(
+        robots=(
+            _car((0, 0, 280, 150), (_dead_armor(), _dead_armor())),
+            _car((0, 0, 280, 150), (_dead_armor(), _live_armor())),  # 混合：还活着
+        )
+    )
+    observations = observations_from_result(result, None, _homography(), None)
+    assert len(observations) == 1  # 全 dead 的被滤掉
+
+
+def test_no_armor_robot_still_observed() -> None:
+    """没检出装甲的车不受死亡门影响（和旧行为一致）。"""
+    result = FrameResult(robots=(_car((0, 0, 280, 150), ()),))
+    observations = observations_from_result(result, None, _homography(), None)
+    assert len(observations) == 1
