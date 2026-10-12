@@ -19,7 +19,7 @@ TEX = ROOT / "scene" / "armor_assets" / "textures"
 STICKER = ROOT / "scene" / "armor_assets" / "stickers"
 OUT = ROOT / "dataset" / "pattern_balanced" / "train"
 RARE_N = 240
-DIGIT_N = 40
+DIGIT_N = 200  # 40 不够：仿真渲染的 1/2/3 被模型系统性高置信读成 S（91 次/200 帧）
 SEED = 7
 ImageU8 = NDArray[uint8]
 
