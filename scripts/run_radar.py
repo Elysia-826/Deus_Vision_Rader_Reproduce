@@ -136,11 +136,10 @@ def _dot(
     *,
     extrapolating: bool = False,
 ) -> None:
-    """实心 = 这帧真的看见；空心 = LOST 外推/猜点，画面上没这辆车。"""
+    """实心 = 这帧真的看见；空圈+? = LOST 外推/猜点，画面上没这辆车。"""
     pt = (int(round(u)), int(round(v)))
     if extrapolating:
-        cv2.circle(board, pt, 11, (0, 0, 0), -1)
-        cv2.circle(board, pt, 11, color, 2)
+        cv2.circle(board, pt, 11, color, 3)  # 纯空圈：背景透出，一眼不是实车
         cv2.putText(board, tag + "?", (pt[0] + 12, pt[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
     else:
         cv2.circle(board, pt, 11, color, -1)
