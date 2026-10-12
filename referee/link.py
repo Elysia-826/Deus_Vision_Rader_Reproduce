@@ -45,6 +45,7 @@ from referee.transport import RefereeTransport
 from track.types import Team
 
 MIN_SEND_INTERVAL_S: Final[float] = 0.2  # 0x0305 上限 5Hz
+_SEND_EPS_S: Final[float] = 1e-6  # 0.6-0.4=0.19999… 这类浮点误差不算超频
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +78,10 @@ class RefereeLink:
         marks 是 12 槽（commands.marks_from_publishes 的输出）。服务器按
         连击公式给 P 计分：宁可 (0,0) 不发，也别把没把握的坐标发出去。
         """
-        if self._last_map_sent_s is not None and now_s - self._last_map_sent_s < MIN_SEND_INTERVAL_S:
+        if (
+            self._last_map_sent_s is not None
+            and now_s - self._last_map_sent_s < MIN_SEND_INTERVAL_S - _SEND_EPS_S
+        ):
             return False
         self._send(CMD_MAP_POSITIONS, encode_map_positions(marks))
         self._last_map_sent_s = now_s

@@ -101,8 +101,44 @@ def encode_map_positions(marks: tuple[MapMark | None, ...]) -> bytes:
     return bytes(out)
 
 
-_ROLE_TO_INDEX: Final[dict[str, int]] = {"1": 0, "2": 1, "3": 2, "4": 3, "S": 5}
+def decode_map_positions(payload: bytes) -> tuple[MapMark | None, ...]:
+    """48B → 12 槽。全零槽 → None。stub 裁判用这读雷达发来的坐标。"""
+    if len(payload) != _MAP_DATA_LEN:
+        raise CommandDecodeError(f"0x0305 应为 {_MAP_DATA_LEN}B，得到 {len(payload)}B")
+    marks: list[MapMark | None] = []
+    for offset in range(0, _MAP_DATA_LEN, 4):
+        x_cm = int.from_bytes(payload[offset : offset + 2], "little")
+        y_cm = int.from_bytes(payload[offset + 2 : offset + 4], "little")
+        marks.append(None if x_cm == 0 and y_cm == 0 else MapMark(x_cm=x_cm, y_cm=y_cm))
+    return tuple(marks)
+
+
+def field_from_mark(mark: MapMark) -> tuple[float, float]:
+    """裁判图 cm → 场地米制（mark_from_field 的逆变换，供 stub 算误差 d 用）。"""
+    x_m = mark.x_cm / 100.0 - FIELD_LENGTH_M / 2.0
+    if _OUR_PLUS_Y_IS_REFEREE_PLUS_Y:
+        y_m = mark.y_cm / 100.0 - FIELD_WIDTH_M / 2.0
+    else:
+        y_m = FIELD_WIDTH_M / 2.0 - mark.y_cm / 100.0
+    return x_m, y_m
+
+
+ROLE_TO_INDEX: Final[dict[str, int]] = {"1": 0, "2": 1, "3": 2, "4": 3, "S": 5}
 """槽内序：hero=0 engineer=1 inf3=2 inf4=3 aerial=4(视觉不占) sentry=5。"""
+
+_ROBOT_IDS: Final[tuple[int, ...]] = (1, 2, 3, 4, 6, 7)
+SLOT_NAMES: Final[tuple[str, ...]] = tuple(
+    f"{'E' if i < 6 else 'A'}{_ROBOT_IDS[i % 6]}" for i in range(12)
+)
+"""12 槽的报告名。数字是协议附录二的机器人 ID（1 英雄 2 工程 3/4 步兵 6 空中 7 哨兵）。"""
+
+
+def slot_index_of(own_team: Team, team: Team, label: str) -> int | None:
+    """真值/发布里带阵营和槽名（如 R2/B1/BS）→ 0x0305 槽下标。识别不了返回 None。"""
+    index = ROLE_TO_INDEX.get(label[-1])
+    if index is None:
+        return None
+    return index if team is not own_team else index + 6
 
 
 def marks_from_publishes(
@@ -123,10 +159,9 @@ def marks_from_publishes(
             continue
         if publish.phase is TrackPhase.LOST and not include_lost:
             continue
-        index = _ROLE_TO_INDEX.get(publish.label[-1])
-        if index is None:
+        slot = slot_index_of(own_team, publish.team, publish.label)
+        if slot is None:
             continue  # Q（前哨）不进 0x0305
-        slot = index if publish.team is not own_team else index + 6
         marks[slot] = mark_from_field(publish.x, publish.y)
     return tuple(marks)
 
