@@ -28,6 +28,7 @@ class Landmark:
     id: str
     name_zh: str
     xy: FieldXY
+    z: float = 0.0  # PnP 用：塔尖/建筑顶填实际高度，地面落点保持 0
 
 
 class _LandmarkFileItem(BaseModel):
@@ -37,6 +38,7 @@ class _LandmarkFileItem(BaseModel):
     name_zh: str
     x: float
     y: float
+    z: float = 0.0
 
 
 class _LandmarkFile(BaseModel):
@@ -57,7 +59,10 @@ def landmarks_from_path(path: Path) -> tuple[tuple[Landmark, ...], tuple[str, ..
         parsed = _LandmarkFile.model_validate(payload)
     except ValidationError as exc:
         raise HomographyError(path=path, reason=str(exc)) from exc
-    table = tuple(Landmark(id=item.id, name_zh=item.name_zh, xy=FieldXY(item.x, item.y)) for item in parsed.landmarks)
+    table = tuple(
+        Landmark(id=item.id, name_zh=item.name_zh, xy=FieldXY(item.x, item.y), z=item.z)
+        for item in parsed.landmarks
+    )
     ids = {item.id for item in table}
     for landmark_id in parsed.click_order:
         if landmark_id not in ids:

@@ -43,3 +43,11 @@ class HomographyError(Exception):
         if self.path is None:
             return self.reason
         return f"{self.path}: {self.reason}"
+
+
+@dataclass(frozen=True, slots=True)
+class PnpCalibrationError(Exception):
+    reason: str
+
+    def __str__(self) -> str:
+        return self.reason
