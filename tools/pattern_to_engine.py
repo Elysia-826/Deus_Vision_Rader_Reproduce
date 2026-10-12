@@ -1,4 +1,13 @@
-"""把 MobileNetV3-Small 分类权重导出为 TensorRT .engine。填好路径后直接运行。"""
+"""把 MobileNetV3-Small 分类权重导出为 TensorRT .engine。
+
+默认导出 weights/pattern_best.*；用环境变量 PATTERN_PT / PATTERN_ONNX /
+PATTERN_ENGINE 可指向别处（例如再训练的 runs checkpoint）：
+
+    $env:PATTERN_PT="runs/pattern/<name>/models/best_mobilenetv3_small.pth"
+    $env:PATTERN_ONNX="weights/pattern_simfix.onnx"
+    $env:PATTERN_ENGINE="weights/pattern_simfix.engine"
+    python tools/pattern_to_engine.py
+"""
 
 from __future__ import annotations
 
@@ -18,14 +27,14 @@ import torch
 
 from models.pattern.model import MobileNetV3SmallClassifier
 
-# ========== 填这里 ==========
-PT_PATH = str(_ROOT / "weights" / "pattern_best.pth")
-ENGINE_PATH = str(_ROOT / "weights" / "pattern_best.engine")
-ONNX_PATH = str(_ROOT / "weights" / "pattern_best.onnx")
+# ========== 默认值，环境变量可覆盖 ==========
+PT_PATH = os.environ.get("PATTERN_PT", str(_ROOT / "weights" / "pattern_best.pth"))
+ENGINE_PATH = os.environ.get("PATTERN_ENGINE", str(_ROOT / "weights" / "pattern_best.engine"))
+ONNX_PATH = os.environ.get("PATTERN_ONNX", str(_ROOT / "weights" / "pattern_best.onnx"))
 IMGSZ = 64
 BATCH = 8
 OPSET = 18
-# ===========================
+# ===========================================
 
 
 def _load_net(pt_path: Path) -> MobileNetV3SmallClassifier:
