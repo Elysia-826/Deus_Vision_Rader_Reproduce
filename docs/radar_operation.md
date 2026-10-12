@@ -113,6 +113,22 @@ LOCATE_MODE = "homography"
 
 相机被碰过就重新点一次。
 
+### 4.3 PnP 标定（升级版，推荐）
+
+单应假设车永远在 z=0 平面；PnP 解完整外参，斜坡/高地下不再有平面假设：
+
+```powershell
+python scripts\validate_pnp.py                                # 先看精度预期（无需图像）
+python scripts\calibrate_pnp.py frame.jpg --intrinsics <相机内参.json>
+```
+
+产物 `locate/calib/Camera_Field.json` 与仿真相机 JSON 同构，`run_radar` 把 poses
+指向它、`LOCATE_MODE = "ray"` 即可走场地网格射线。实测 10px 糟糕点击下端到端
+P90 误差 0.24 m（准确线 0.8 m）。
+
+注意：`landmarks.json` 的默认四点全在 y=0 中线上——PnP 会直接报错拒绝。
+真机用 PnP 前先在表里加入非共线的地标（停机坪/补给站/高地角点，可带 z 高度）。
+
 ### 4.3 验收
 
 - 图像中心投到场地应接近能量机关附近（蓝侧雷达时 x 为正）

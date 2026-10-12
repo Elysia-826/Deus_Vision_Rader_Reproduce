@@ -36,12 +36,18 @@ from locate.homography import HomographyMap, homography_from_path  # noqa: E402
 from locate.minimap import minimap_from_path  # noqa: E402
 
 from locate.types import FieldXY  # noqa: E402
+from referee.commands import MarkProgress, RadarInfo, marks_from_publishes  # noqa: E402
+from referee.link import RefereeLink  # noqa: E402
+from referee.policy import should_trigger_double  # noqa: E402
+from referee.stub import StubReferee  # noqa: E402
+from referee.transport import LoopbackPair  # noqa: E402
 from track.cascade import CascadeMatchTracker  # noqa: E402
+from track.guess import apply_guess_to_lost  # noqa: E402
 from track.errors import TruthFieldError, UnmappedRobotName  # noqa: E402
 from track.log import append_frame  # noqa: E402
 from track.observe import observations_from_result  # noqa: E402
 from track.truth import parse_sim_robots  # noqa: E402
-from track.types import PublishedTrack, SimRobot, Team  # noqa: E402
+from track.types import PublishedTrack, SimRobot, Team, TrackPhase  # noqa: E402
 
 # ========== 开关 ==========
 # RADAR_SOURCE / RADAR_IMAGES_DIR 环境变量可覆盖（打分跑批用，不用改代码）。
@@ -66,6 +72,14 @@ SHOW_GT = False
 # 注意不能填 0：del trail[:-0] 删不掉东西，列表会无限涨还照画不误。
 TRAIL_LEN = 1
 IDENTITY_LOG = Path(os.environ.get("RADAR_IDENTITY_LOG", str(_ROOT / "scene" / "locate_out" / "identity_log.jsonl")))
+# 裁判 stub（打分端）：RADAR_REFEREE_STUB=1 后，每帧把发布坐标打包成 0x0305
+# 发进内存回环，stub 裁判按规则 5.6.6 算 P，逐帧写 REFEREE_LOG。
+REFEREE_STUB = os.environ.get("RADAR_REFEREE_STUB", "0") == "1"
+REFEREE_LOG = Path(os.environ.get("RADAR_REFEREE_LOG", str(_ROOT / "scene" / "locate_out" / "referee_log.jsonl")))
+# 质量门 A/B：RADAR_SEND_LOST=1 时 LOST（卡尔曼外推）槽也发 0x0305。
+SEND_LOST = os.environ.get("RADAR_SEND_LOST", "0") == "1"
+# RADAR_GUESS=1：LOST 槽坐标换成战略猜点（配合 SEND_LOST 才会真的发出去）。
+GUESS_LOST = os.environ.get("RADAR_GUESS", "0") == "1"
 # =========================
 
 ImageU8 = NDArray[uint8]
@@ -113,11 +127,25 @@ def _robots(raw: dict[str, object]) -> tuple[SimRobot, ...]:  # noqa: OBJECT_OK
     return parse_sim_robots(mappings)
 
 
-def _dot(board: ImageU8, u: float, v: float, color: tuple[int, int, int], tag: str) -> None:
+def _dot(
+    board: ImageU8,
+    u: float,
+    v: float,
+    color: tuple[int, int, int],
+    tag: str,
+    *,
+    extrapolating: bool = False,
+) -> None:
+    """实心 = 这帧真的看见；空心 = LOST 外推/猜点，画面上没这辆车。"""
     pt = (int(round(u)), int(round(v)))
-    cv2.circle(board, pt, 11, color, -1)
-    cv2.circle(board, pt, 11, (0, 0, 0), 2)
-    cv2.putText(board, tag, (pt[0] + 12, pt[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+    if extrapolating:
+        cv2.circle(board, pt, 11, (0, 0, 0), -1)
+        cv2.circle(board, pt, 11, color, 2)
+        cv2.putText(board, tag + "?", (pt[0] + 12, pt[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+    else:
+        cv2.circle(board, pt, 11, color, -1)
+        cv2.circle(board, pt, 11, (0, 0, 0), 2)
+        cv2.putText(board, tag, (pt[0] + 12, pt[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
 
 def _draw_trail(board: ImageU8, pts: list[tuple[int, int]], color: tuple[int, int, int]) -> None:
@@ -185,7 +213,14 @@ def overlay(
         del trail[:-TRAIL_LEN]
         seen.add(item.label)
         _draw_trail(board, trail, color)
-        _dot(board, mapped.u, mapped.v, color, item.label)
+        _dot(
+            board,
+            mapped.u,
+            mapped.v,
+            color,
+            item.label,
+            extrapolating=item.phase is TrackPhase.LOST,
+        )
     for tag in list(trails):
         if tag not in seen:
             trails.pop(tag, None)
@@ -243,6 +278,14 @@ def main() -> None:
     trails: dict[str, list[tuple[int, int]]] = {}
     tracker = CascadeMatchTracker()
     last_tick: float | None = None
+    t_sim = 0.0
+    referee_link: RefereeLink | None = None
+    referee_stub: StubReferee | None = None
+    referee_own: Team | None = None
+    if REFEREE_STUB:
+        REFEREE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        REFEREE_LOG.write_text("", encoding="utf-8")
+        print("run_radar referee stub on ->", REFEREE_LOG.name, flush=True)
     if source is FrameSource.BLENDER or source is FrameSource.IMAGES:
         IDENTITY_LOG.parent.mkdir(parents=True, exist_ok=True)
         IDENTITY_LOG.write_text("", encoding="utf-8")
@@ -307,11 +350,40 @@ def main() -> None:
         result = detector.infer(frame, persist_tracks=False)
         fps = 1.0 / max(time.perf_counter() - t0, 1e-6)
         now = time.perf_counter()
-        dt_s = 0.1 if last_tick is None else max(now - last_tick, 1e-3)
+        first_tick = last_tick is None
+        dt_s = 0.1 if first_tick else max(now - last_tick, 1e-3)
         if source is FrameSource.IMAGES:
             dt_s = img_dt
         last_tick = now
+        t_sim = 0.0 if first_tick else t_sim + dt_s
         publishes = tracker.step(observations_from_result(result, pose, homography, mesh), dt_s)
+        if GUESS_LOST:
+            publishes = apply_guess_to_lost(publishes)
+        if REFEREE_STUB:
+            if referee_link is None or referee_stub is None or referee_own is None:
+                referee_own = Team.BLUE if "Blue" in camera_name else Team.RED
+                pair = LoopbackPair()
+                referee_link = RefereeLink(pair.radar, own_team=referee_own)
+                referee_stub = StubReferee(pair.peer, own_team=referee_own)
+                print("run_radar referee own_team", referee_own.value, flush=True)
+            referee_stub.set_truth(truth)
+            referee_link.send_map(
+                marks_from_publishes(referee_own, publishes, include_lost=SEND_LOST),
+                now_s=t_sim,
+            )
+            referee_stub.step(now_s=t_sim)
+            radar_info_state: RadarInfo | None = None
+            mark_state: MarkProgress | None = None
+            for event in referee_link.poll(timeout_s=0.0):
+                if event.radar_info is not None:
+                    radar_info_state = event.radar_info
+                if event.mark_progress is not None:
+                    mark_state = event.mark_progress
+            if radar_info_state is not None and mark_state is not None:
+                if should_trigger_double(radar_info_state, mark_state):
+                    referee_link.trigger_double()
+                    print(f"[{last_frame}] double triggered, chances left {radar_info_state.double_chances - 1}", flush=True)
+            referee_stub.log_frame(REFEREE_LOG, last_frame, now_s=t_sim)
         if source is FrameSource.BLENDER or source is FrameSource.IMAGES:
             append_frame(IDENTITY_LOG, last_frame, truth, publishes)
         vis = overlay(frame, result, calib, minimap, truth, publishes, trails, fps)
@@ -324,6 +396,15 @@ def main() -> None:
 
     if cap is not None:
         cap.release()
+    if referee_stub is not None:
+        summary = referee_stub.summary()
+        print(
+            "referee frames", summary.frames,
+            "union_vuln_s", round(summary.union_vuln_s, 2),
+            "double_chances", summary.double_chances_earned,
+            flush=True,
+        )
+        print("score: python scripts/score_referee.py", REFEREE_LOG, flush=True)
     cv2.destroyAllWindows()
 
 

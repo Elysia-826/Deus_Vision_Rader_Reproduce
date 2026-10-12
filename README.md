@@ -18,14 +18,17 @@
 ```
 detect/            车 → 装甲推理（BoT-SORT 在 detect/trackers/）
 models/            YOLO26 + MobileNetV3 训练
-locate/            像素 → 场地米制 → 俯视图（射线 / 地标单应）
-scripts/           可视化、仿真启动、标定
+locate/            像素 → 场地米制 → 俯视图（射线 / 地标单应 / PnP 标定）
+referee/           裁判串口协议骨架 + stub 裁判（RM2026 V1.3.0，未接真机）
+track/             槽位级联跟踪 + 战略猜点
+scripts/           可视化、仿真启动、标定、打分
 tools/             pt → onnx / TensorRT
 tests/             pytest
 docs/              操作手册
 dataset/           划分脚本（图像不进 git）
 weights/           本地权重（不进 git）
 scene/             RMUC2026 Blender 仿真（CAD/贴图不进 git）
+refs/              官方协议/规则手册本地留档（不进 git）
 ```
 
 ## 和港科大的差异
@@ -55,7 +58,20 @@ pytest
 python scripts/eval_foot_ray.py --weights <best.pt>     # 新车权重 1.2 m 底边射线验收
 python scripts/score_identity_log.py [log.jsonl]        # 发布点 vs 真值：召回/误差/野点
 python scripts/score_stage_funnel.py                    # GT→车→装甲→图案 分级漏斗
+python scripts/score_referee.py [log.jsonl]              # stub 裁判基准：易伤秒/准确率/P
+python scripts/validate_pnp.py                           # PnP 标定精度（噪声→端到端误差）
 ```
+
+裁判 stub 基准（规则手册 5.6.6 计分公式的离线复刻）：
+
+```bash
+RADAR_REFEREE_STUB=1 RADAR_SEND_LOST=1 python scripts/run_radar.py   # 回放 + stub 打分
+python scripts/score_referee.py                                       # 出易伤报告
+```
+
+质量门 A/B 开关：`RADAR_SEND_LOST=1`（LOST 外推也发 0x0305）、`RADAR_GUESS=1`
+（LOST 坐标换战略猜点）。patrol 序列实测：外推 +67% 易伤秒（7.0→11.7s）；
+猜点 −100%（短遮挡场景外推本来就准，固定战略点全错）——所以猜点默认关。
 
 基准视频流：`generate_radar_car_sim.py --motion patrol --dt 0.1 [--spin 6.0]` 渲染 10 Hz 固定步长序列（每帧带真值 json），`run_radar.py` 用 `RADAR_SOURCE=images RADAR_HEADLESS=1 RADAR_IMAGES_DIR=... RADAR_IDENTITY_LOG=...` 离线回放打分。同一份序列两次运行逐字节一致。
 
