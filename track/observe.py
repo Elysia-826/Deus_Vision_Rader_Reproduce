@@ -33,13 +33,12 @@ def observations_from_result(
 ) -> tuple[FieldObservation, ...]:
     """底边像素乘现成定位。单应优先；否则打场地网格，没有网格退回 z=0。
 
-    死亡门：装甲全 dead 的车不产观测——死了的车不该继续喂槽，
-    槽转 LOST 后按既有语义自然停发（0.5s 内）。没检出装甲的车照旧。
+    死亡只是附带信息：全 dead 装甲的车照常产出观测（armor_dead=True），
+    由跟踪器做时序裁决（连续 DEAD_FRAMES 帧才真死）。逐帧丢弃会饿死
+    跟踪器——实测仿真里 28% 的车帧装甲全误闪 dead。
     """
     found: list[FieldObservation] = []
     for robot in result.robots:
-        if robot.armors and all(armor.label == "dead" for armor in robot.armors):
-            continue
         pixel = foot_pixel(robot.car.box)
         hit = _to_field(pixel, pose, homography, mesh)
         if hit is None or not _on_field(hit):
@@ -53,6 +52,7 @@ def observations_from_result(
                 team=team,
                 role=role,
                 pattern_conf=conf,
+                armor_dead=bool(robot.armors) and all(armor.label == "dead" for armor in robot.armors),
             )
         )
     return tuple(found)

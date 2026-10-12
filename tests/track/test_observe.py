@@ -70,20 +70,24 @@ def _dead_armor() -> Detection:
     return Detection(label="dead", conf=0.8, box=BBox(10, 10, 20, 20), pattern=PatternPred(name="3", conf=0.8))
 
 
-def test_all_dead_armors_drop_the_observation() -> None:
-    """死亡门：装甲全 dead 的车不产观测，死了的车不再喂槽。"""
+def test_all_dead_armors_tag_the_observation_not_drop_it() -> None:
+    """死亡只是标志位：全 dead 装甲的车照常产出观测，时序裁决在跟踪器。"""
     result = FrameResult(
         robots=(
             _car((0, 0, 280, 150), (_dead_armor(), _dead_armor())),
-            _car((0, 0, 280, 150), (_dead_armor(), _live_armor())),  # 混合：还活着
+            _car((0, 0, 280, 150), (_dead_armor(), _live_armor())),  # 混合
+            _car((0, 0, 280, 150), ()),  # 无装甲
         )
     )
     observations = observations_from_result(result, None, _homography(), None)
-    assert len(observations) == 1  # 全 dead 的被滤掉
+    assert len(observations) == 3  # 一个都不丢
+    assert observations[0].armor_dead is True  # 全 dead
+    assert observations[1].armor_dead is False  # 混合：不算死
+    assert observations[2].armor_dead is False  # 无装甲：不判死
 
 
 def test_no_armor_robot_still_observed() -> None:
-    """没检出装甲的车不受死亡门影响（和旧行为一致）。"""
+    """没检出装甲的车不受死亡标志影响（和旧行为一致）。"""
     result = FrameResult(robots=(_car((0, 0, 280, 150), ()),))
     observations = observations_from_result(result, None, _homography(), None)
     assert len(observations) == 1

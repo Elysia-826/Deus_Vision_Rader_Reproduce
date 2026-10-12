@@ -61,7 +61,11 @@ def all_slots() -> tuple[SlotId, ...]:
 
 @dataclass(frozen=True, slots=True)
 class FieldObservation:
-    """一辆已定位的车。图案和颜色都可以空。"""
+    """一辆已定位的车。图案和颜色都可以空。
+
+    armor_dead：本帧该车的装甲全被检成 dead（灯条熄灭态）。单帧不可信
+    （仿真实测 28% 误闪），跟踪器连续 DEAD_FRAMES 帧才判死。
+    """
 
     bot_id: int | None
     x: float
@@ -69,6 +73,7 @@ class FieldObservation:
     team: Team | None
     role: Role | None
     pattern_conf: float
+    armor_dead: bool = False
 
 
 @dataclass(frozen=True, slots=True)
