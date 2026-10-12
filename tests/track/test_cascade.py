@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pytest
 
@@ -12,6 +12,8 @@ def _obs(
     y: float,
     team: Team | None,
     role: Role | None,
+    *,
+    armor_dead: bool = False,
 ) -> FieldObservation:
     return FieldObservation(
         bot_id=bot_id,
@@ -20,6 +22,7 @@ def _obs(
         team=team,
         role=role,
         pattern_conf=0.9 if role is not None else 0.0,
+        armor_dead=armor_dead,
     )
 
 
@@ -107,3 +110,30 @@ def test_off_field_observation_never_reaches_the_minimap() -> None:
     tracker = CascadeMatchTracker()
     out = tracker.step((_obs(1, 15.9, 0.0, Team.RED, Role.THREE),), dt_s=1.0)
     assert out == ()
+
+
+def test_consecutive_all_dead_kills_the_slot() -> None:
+    """连着 DEAD_FRAMES 帧装甲全 dead → 判死停发；复活后重新确认再上屏。"""
+    tracker = CascadeMatchTracker()
+    _confirm(tracker)
+    for _ in range(5):
+        out = tracker.step(
+            (_obs(1, 1.0, 0.0, Team.RED, Role.THREE, armor_dead=True),), dt_s=1.0
+        )
+    assert tracker.step((_obs(1, 1.0, 0.0, Team.RED, Role.THREE, armor_dead=True),), dt_s=1.0) == ()
+    # 复活：灯条重新点亮，重新确认（2 帧 AGREE）后恢复发布
+    tracker.step((_obs(1, 1.0, 0.0, Team.RED, Role.THREE),), dt_s=1.0)
+    revived = tracker.step((_obs(1, 1.1, 0.0, Team.RED, Role.THREE),), dt_s=1.0)
+    assert any(item.label == "R3" for item in revived)
+
+
+def test_dead_flicker_never_kills_the_slot() -> None:
+    """dead 单帧误闪率 28%：dead/活 交替闪 12 帧也绝不能死。"""
+    tracker = CascadeMatchTracker()
+    _confirm(tracker)
+    for index in range(12):
+        dead = index % 2 == 0
+        out = tracker.step(
+            (_obs(1, 1.0 + 0.01 * index, 0.0, Team.RED, Role.THREE, armor_dead=dead),), dt_s=1.0
+        )
+        assert any(item.label == "R3" for item in out)

@@ -24,6 +24,7 @@ from track.types import (
 MATCH_GATE_M: Final = 2.5
 CONFIRM_HITS: Final = 2
 COAST_FRAMES: Final = 5
+DEAD_FRAMES: Final = 5  # 连续 5 帧（0.5s@10Hz）装甲全 dead 才判死；单帧误闪率 28% 不可信
 REBIND_FRAMES: Final = 3
 BIRTH_CONF: Final = 0.5
 BOT_BONUS: Final = 0.8
@@ -61,6 +62,7 @@ class _Slot:
     hit_count: int = 0
     miss_count: int = 0
     rebind_streak: int = 0
+    dead_streak: int = 0
     seen: bool = False
     last_x: float = 0.0
     last_y: float = 0.0
@@ -113,6 +115,11 @@ class CascadeMatchTracker:
             slot.team_hist.append(obs.team)
         if obs.role is not None:
             slot.role_hist.append(obs.role)
+        # 死亡时序投票：连续 DEAD_FRAMES 帧装甲全 dead 才真死（单帧误闪 28%）。
+        if obs.armor_dead:
+            slot.dead_streak += 1
+        else:
+            slot.dead_streak = 0
         match slot.phase:
             case TrackPhase.INACTIVE:
                 slot.phase = TrackPhase.TENTATIVE
@@ -136,6 +143,8 @@ class CascadeMatchTracker:
                 _note_bot(slot, obs, status)
             case unreachable:
                 assert_never(unreachable)
+        if slot.dead_streak >= DEAD_FRAMES:
+            _deactivate(slot)  # 尸体停发：连着半秒装甲全熄，判死释放槽位
 
     def _mark_miss(self, slot: _Slot) -> None:
         match slot.phase:
@@ -195,6 +204,8 @@ def _pair_cost(slot: _Slot, obs: FieldObservation) -> float:
     status = pattern_status(slot, obs)
     match slot.phase:
         case TrackPhase.INACTIVE:
+            if obs.armor_dead:
+                return REJECT  # 装甲全熄的车不许开新槽：先当尸体，不当新车
             if status is not PatternStatus.AGREE or obs.pattern_conf < BIRTH_CONF:
                 return REJECT
             return 1.0 - obs.pattern_conf
@@ -290,6 +301,7 @@ def _deactivate(slot: _Slot) -> None:
     slot.hit_count = 0
     slot.miss_count = 0
     slot.rebind_streak = 0
+    slot.dead_streak = 0
     slot.seen = False
     slot.filt = PlanarKalman()
     slot.team_hist.clear()
