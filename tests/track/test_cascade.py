@@ -90,3 +90,20 @@ def test_occlusion_coasts_with_last_velocity_instead_of_vanishing() -> None:
     assert coast[1][0].x == pytest.approx(6.0, abs=0.55)
     assert coast[2][0].x == pytest.approx(7.5, abs=0.7)
     assert coast[0][0].x > 3.3
+
+
+def test_off_field_extrapolation_stops_publishing() -> None:
+    """外推漂出场地就停发：车不可能在场外，画出去/发裁判都是错的。"""
+    tracker = CascadeMatchTracker()
+    tracker.step((_obs(1, 14.0, 0.0, Team.RED, Role.THREE),), dt_s=1.0)
+    tracker.step((_obs(1, 14.2, 0.0, Team.RED, Role.THREE),), dt_s=1.0)  # CONFIRMED，贴边
+    assert len(tracker.step((), dt_s=1.0)) == 1  # LOST 外推 14.4 还在场内
+    gone = tracker.step((), dt_s=1.0)  # 外推越过 +14.5
+    assert all(item.label != "R3" for item in gone)
+
+
+def test_off_field_observation_never_reaches_the_minimap() -> None:
+    """观测侧 2m 宽容度放进来的远出界点，发布侧收紧到 ±0.5m。"""
+    tracker = CascadeMatchTracker()
+    out = tracker.step((_obs(1, 15.9, 0.0, Team.RED, Role.THREE),), dt_s=1.0)
+    assert out == ()

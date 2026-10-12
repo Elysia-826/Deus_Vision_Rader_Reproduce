@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Final, assert_never
 
+from locate.field import FIELD_X_MAX, FIELD_X_MIN, FIELD_Y_MAX, FIELD_Y_MIN
 from track.assign import REJECT, min_cost_pairs
 from track.kalman import PlanarKalman
 from track.types import (
@@ -240,18 +241,35 @@ def _note_bot(slot: _Slot, obs: FieldObservation, status: PatternStatus) -> None
 
 
 def _visible(slot: _Slot) -> bool:
+    """发布条件 = 状态机还在讲这台车 + 位置还在场上。
+
+    车不可能出场地：外推漂出场（x 越过 ±14.5 等）说明这轨道已经死了，
+    画到小地图场外、发给裁判都只会是错的。内部 Kalman 不杀，车再冒头
+    还能靠匹配续上。
+    """
     match slot.phase:
         case TrackPhase.CONFIRMED:
-            return True
+            pass
         case TrackPhase.LOST:
-            return slot.miss_count < COAST_FRAMES
+            if slot.miss_count >= COAST_FRAMES:
+                return False
         case TrackPhase.TENTATIVE:
-            return True
+            pass
         case TrackPhase.INACTIVE:
             return False
         case unreachable:
             assert_never(unreachable)
+    return _on_field_publish(slot.filt.x, slot.filt.y)
 
+
+_PUBLISH_MARGIN_M: Final = 0.5  # 真车最大半长；观测侧的 2m 宽容度不该带进发布
+
+
+def _on_field_publish(x: float, y: float) -> bool:
+    return (
+        FIELD_X_MIN - _PUBLISH_MARGIN_M <= x <= FIELD_X_MAX + _PUBLISH_MARGIN_M
+        and FIELD_Y_MIN - _PUBLISH_MARGIN_M <= y <= FIELD_Y_MAX + _PUBLISH_MARGIN_M
+    )
 
 def _correct(slot: _Slot, obs: FieldObservation, dt_s: float) -> None:
     vx = (obs.x - slot.last_x) / dt_s if slot.seen and dt_s > 0.0 else None
