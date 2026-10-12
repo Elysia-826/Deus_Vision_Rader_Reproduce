@@ -73,6 +73,16 @@ python scripts/score_referee.py                                       # 出易�
 （LOST 坐标换战略猜点）。patrol 序列实测：外推 +67% 易伤秒（7.0→11.7s）；
 猜点 −100%（短遮挡场景外推本来就准，固定战略点全错）——所以猜点默认关。
 
+已知问题（stub 基准量化，按伤害排序）：
+
+1. **图案模型把仿真兵种系统性高置信读成「S」**：1→S 64 次、2→S 18 次、
+   3→S 9 次，全部 conf≈0.94。这是幻影哨兵槽（E7/A7 每回放 60+ 帧全错发）
+   的根因，出生门槛拦不住 0.94 的票，跟踪器侧无解。下一攻坚：用仿真
+   英雄/工程/步兵装甲 crop 重训/精调 pattern 分类器（数据在
+   `dataset/pattern_balanced`，训练 `python -m models.pattern`）。
+2. dead 装甲单帧误闪率 28%——已用时序投票（连续 5 帧才判死）压住。
+3. 无装甲观测占 48.8%：影子喂给最近的槽，真槽和幻影都靠它续命。
+
 基准视频流：`generate_radar_car_sim.py --motion patrol --dt 0.1 [--spin 6.0]` 渲染 10 Hz 固定步长序列（每帧带真值 json），`run_radar.py` 用 `RADAR_SOURCE=images RADAR_HEADLESS=1 RADAR_IMAGES_DIR=... RADAR_IDENTITY_LOG=...` 离线回放打分。同一份序列两次运行逐字节一致。
 
 Windows 仿真：
