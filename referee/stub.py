@@ -84,6 +84,44 @@ class StubSummary:
     frames: int
 
 
+class GamePhase(StrEnum):
+    """比赛阶段（规则手册第 6 章）。非战斗阶段收到的标记不进 P。"""
+
+    PREPARE = "prepare"          # 三分钟准备
+    SELF_CHECK = "self_check"    # 15s 裁判系统自检
+    COUNTDOWN = "five_second"    # 5s 倒计时
+    BATTLE = "battle"            # 七分钟战斗
+    SETTLE = "settle"            # 结算（规则里没有但作为终止态方便基准）
+
+
+# 阶段时长（秒）。基准回放跑不了 7 分钟全程，所以允许外部覆盖。
+PHASE_PREPARE_S: Final[float] = 180.0
+PHASE_SELF_CHECK_S: Final[float] = 15.0
+PHASE_COUNTDOWN_S: Final[float] = 5.0
+PHASE_BATTLE_S: Final[float] = 420.0
+
+
+def phase_at(now_s: float, *, pre_battle_scale: float = 1.0) -> GamePhase:
+    """按时间线返回当前阶段。pre_battle_scale 只压准备/自检/倒计时，
+    战斗期保持全长（420s）——基准回放 20s 需要完整的战斗窗口。
+
+    scale=0.0001 → 准备 18ms/自检 1.5ms/倒计时 0.5ms，战斗从 ~0.02s 到 420s。
+    scale=0.05   → 准备 9s/自检 0.75s/倒计时 0.25s，战斗从 ~10s 到 430s。
+    """
+    p = PHASE_PREPARE_S * pre_battle_scale
+    sc = PHASE_SELF_CHECK_S * pre_battle_scale
+    cd = PHASE_COUNTDOWN_S * pre_battle_scale
+    if now_s < p:
+        return GamePhase.PREPARE
+    if now_s < p + sc:
+        return GamePhase.SELF_CHECK
+    if now_s < p + sc + cd:
+        return GamePhase.COUNTDOWN
+    if now_s < p + sc + cd + PHASE_BATTLE_S:
+        return GamePhase.BATTLE
+    return GamePhase.SETTLE
+
+
 class StubReferee:
     """回环对端的假服务器。truth 由外部按帧注入（run_radar 的仿真真值）。"""
 
@@ -99,6 +137,8 @@ class StubReferee:
         self._double_used = 0
         self._double_active_until_s: float | None = None
         self._frames = 0
+        self._phase_scale: float = 1.0
+        self._current_phase: GamePhase = GamePhase.PREPARE
 
     # ---------- 输入 ----------
 
@@ -114,14 +154,32 @@ class StubReferee:
             self._slots[index].truth_x = robot.x
             self._slots[index].truth_y = robot.y
 
+    def set_phase_scale(self, scale: float) -> None:
+        """压缩赛前阶段（准备/自检/倒计时）。战斗期保持 420s 全长。"""
+        self._phase_scale = scale
+
+    @property
+    def phase(self) -> GamePhase:
+        return self._current_phase
+
     def step(self, *, now_s: float) -> None:
-        """一帧：收雷达包 → 中断判定 → 易伤秒积分 → 1Hz 回发反馈。"""
+        """一帧：更新阶段 → 收雷达包 → 中断判定 → 易伤秒积分 → 回发反馈。
+
+        非战斗阶段（准备/自检/倒计时）：标记不进 P、不判中断、不积易伤秒。
+        """
+        self._current_phase = phase_at(now_s, pre_battle_scale=self._phase_scale)
         if self._last_step_s is None:
             for slot in self._slots:
                 slot.last_data_s = now_s
         dt = 0.0 if self._last_step_s is None else now_s - self._last_step_s
         self._last_step_s = now_s
         self._frames += 1
+
+        if self._current_phase is not GamePhase.BATTLE:
+            # 非战斗：清掉收到的包（不评分），不判中断，不积秒
+            self._parser.feed(self._transport.read(0.0))  # 排空缓冲防积压
+            return
+
         for slot in self._slots:
             slot.judge = Judgement.SILENT
 
@@ -198,7 +256,12 @@ class StubReferee:
                 "judge": slot.judge.value,
                 "vuln": slot.p >= 100.0,
             }
-        record = {"frame": frame, "t": round(now_s, 3), "slots": slots}
+        record = {
+            "frame": frame,
+            "t": round(now_s, 3),
+            "phase": self._current_phase.value,
+            "slots": slots,
+        }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 

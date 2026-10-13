@@ -84,6 +84,9 @@ GUESS_LOST = os.environ.get("RADAR_GUESS", "0") == "1"
 # USB 直连（MV-CH120 系列）：RADAR_HIK_URL=0
 # RTSP（网络相机）：       RADAR_HIK_URL=rtsp://user:pass@192.168.1.64:554/...
 HIK_URL = os.environ.get("RADAR_HIK_URL", "0")  # 默认 USB 第 0 路
+# stub 裁判阶段压缩：1.0=真实时长（准备3min+自检15s+倒计时5s+战斗7min）。
+# 0.05 → 准备 9s+自检 0.75s+倒计时 0.25s+战斗 21s——回放 20s 序列能测到阶段切换。
+PHASE_SCALE = float(os.environ.get("RADAR_PHASE_SCALE", "0.05"))
 # =========================
 
 ImageU8 = NDArray[uint8]
@@ -387,7 +390,8 @@ def main() -> None:
                 pair = LoopbackPair()
                 referee_link = RefereeLink(pair.radar, own_team=referee_own)
                 referee_stub = StubReferee(pair.peer, own_team=referee_own)
-                print("run_radar referee own_team", referee_own.value, flush=True)
+                referee_stub.set_phase_scale(PHASE_SCALE)
+                print("run_radar referee own_team", referee_own.value, "phase_scale", PHASE_SCALE, flush=True)
             referee_stub.set_truth(truth)
             referee_link.send_map(
                 marks_from_publishes(referee_own, publishes, include_lost=SEND_LOST),

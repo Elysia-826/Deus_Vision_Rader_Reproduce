@@ -17,6 +17,7 @@ def _pair(own: Team) -> tuple[RefereeLink, StubReferee]:
     pair = LoopbackPair()
     link = RefereeLink(pair.radar, own_team=own)
     stub = StubReferee(pair.peer, own_team=own)
+    stub.set_phase_scale(0.0001)  # 准备 18ms → t>0.02 全在战斗期
     return link, stub
 
 
@@ -159,3 +160,38 @@ def test_log_frame_writes_parseable_records(tmp_path) -> None:
     assert record["slots"]["E2"]["sent"] is True
     assert record["slots"]["E2"]["judge"] == "accurate"
     assert "E1" not in record["slots"]  # 没真值也没发过的槽不写
+
+
+def test_prepare_phase_marks_do_not_score() -> None:
+    """准备期发的标记不进 P——真裁判也不会在没开赛时计分。"""
+    from referee.stub import GamePhase, phase_at
+
+    pair = LoopbackPair()
+    link = RefereeLink(pair.radar, own_team=Team.BLUE)
+    stub = StubReferee(pair.peer, own_team=Team.BLUE)
+    stub.set_phase_scale(1.0)  # 真实时长：准备 180s
+    stub.set_truth(_engineer())
+
+    # 准备期（0~180s）：发标记但不计分
+    assert phase_at(100.0) is GamePhase.PREPARE
+    stub.step(now_s=0.0)
+    link.send_map(_marks(_E, 5.0, 3.0), now_s=1.0)
+    stub.step(now_s=1.0)
+    assert stub.p_at(_E) == 0.0  # 准备期不进 P
+
+    # 倒计时结束进入战斗
+    assert phase_at(200.1, pre_battle_scale=1.0) is GamePhase.BATTLE
+    link.send_map(_marks(_E, 5.0, 3.0), now_s=200.2)
+    stub.step(now_s=200.2)
+    assert stub.p_at(_E) == pytest.approx(1.0)  # 战斗期正常计分
+
+
+def test_battle_starts_after_countdown_with_small_scale() -> None:
+    """scale=0.05：准备 9s + 自检 0.75s + 倒计时 0.25s → 战斗从 10s 开始。"""
+    from referee.stub import GamePhase, phase_at
+
+    assert phase_at(8.9, pre_battle_scale=0.05) is GamePhase.PREPARE
+    assert phase_at(9.5, pre_battle_scale=0.05) is GamePhase.SELF_CHECK
+    assert phase_at(9.9, pre_battle_scale=0.05) is GamePhase.COUNTDOWN
+    assert phase_at(10.0, pre_battle_scale=0.05) is GamePhase.BATTLE
+    assert phase_at(430.1, pre_battle_scale=0.05) is GamePhase.SETTLE  # 10+420=430
