@@ -56,7 +56,7 @@ def jitter_plate(plate: ImageU8, rng: random.Random) -> ImageU8:
         ]
     )
     warped = cv2.warpPerspective(plate, cv2.getPerspectiveTransform(src, dst), (width, height), borderValue=(8, 8, 8))
-    edge = rng.randint(28, 72)
+    edge = rng.randint(18, 72)  # 18 起步：雷达远距装甲 crop 实测 18-38px，28-72 覆盖不到混淆区间
     small = cv2.resize(warped, (edge, edge), interpolation=cv2.INTER_AREA)
     pad = rng.randint(2, 10)
     canvas = np.full((edge + 2 * pad, edge + 2 * pad, 3), rng.randint(4, 28), dtype=uint8)
