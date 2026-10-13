@@ -80,6 +80,10 @@ REFEREE_LOG = Path(os.environ.get("RADAR_REFEREE_LOG", str(_ROOT / "scene" / "lo
 SEND_LOST = os.environ.get("RADAR_SEND_LOST", "0") == "1"
 # RADAR_GUESS=1：LOST 槽坐标换成战略猜点（配合 SEND_LOST 才会真的发出去）。
 GUESS_LOST = os.environ.get("RADAR_GUESS", "0") == "1"
+# 海康/真相机源：RADAR_HIK_URL（RTSP 地址或设备号）。
+# USB 直连（MV-CH120 系列）：RADAR_HIK_URL=0
+# RTSP（网络相机）：       RADAR_HIK_URL=rtsp://user:pass@192.168.1.64:554/...
+HIK_URL = os.environ.get("RADAR_HIK_URL", "0")  # 默认 USB 第 0 路
 # =========================
 
 ImageU8 = NDArray[uint8]
@@ -229,9 +233,7 @@ def overlay(
 def main() -> None:
     source = FrameSource(SOURCE)
     match source:
-        case FrameSource.HIK:
-            raise SourceNotReadyError(source=source.value)
-        case FrameSource.BLENDER | FrameSource.VIDEO | FrameSource.IMAGES:
+        case FrameSource.BLENDER | FrameSource.VIDEO | FrameSource.IMAGES | FrameSource.HIK:
             pass
         case unreachable:
             raise SourceNotReadyError(source=str(unreachable))
@@ -261,6 +263,16 @@ def main() -> None:
         cap = cv2.VideoCapture(VIDEO_PATH)
         if not cap.isOpened():
             raise vis2.ImageReadError(Path(VIDEO_PATH))
+    if source is FrameSource.HIK:
+        url = HIK_URL
+        # 纯数字当设备号，其余当 RTSP URL
+        cap = cv2.VideoCapture(int(url)) if url.isdigit() else cv2.VideoCapture(url)
+        if not cap.isOpened():
+            raise vis2.ImageReadError(Path(f"camera:{url}"))
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        print(f"run_radar hik camera {url} → {w}x{h} @ {fps:.0f}fps", flush=True)
     img_files: list[Path] = []
     if source is FrameSource.IMAGES:
         img_files = sorted(IMAGES_DIR.glob("*.jpg"))
@@ -336,7 +348,18 @@ def main() -> None:
         else:
             ok, frame = cap.read()
             if not ok:
-                break
+                if source is FrameSource.HIK:
+                    # 断流重连：真相机偶尔掉线，等 1 秒重试，不退出
+                    print("run_radar hik frame drop, reconnecting…", flush=True)
+                    time.sleep(1.0)
+                    cap.release()
+                    cap = cv2.VideoCapture(int(HIK_URL)) if HIK_URL.isdigit() else cv2.VideoCapture(HIK_URL)
+                    if cap.isOpened():
+                        continue
+                    print("run_radar hik reconnect failed, retrying…", flush=True)
+                    time.sleep(2.0)
+                    continue
+                break  # VIDEO 文件读完正常退出
             last_frame += 1
 
         if frame is None:
