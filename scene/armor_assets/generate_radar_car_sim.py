@@ -24,6 +24,7 @@ MIN_BOX = 0.008
 RES_X, RES_Y = 4096, 3000
 LENS_MM = 8.0
 SPEED_MPS = 1.5
+DWELL_S = 3.0  # waypoint 停留秒数：>3s 可让 P 突破 100（5Hz 连击 14 发）
 PATROL_DT = 1.0
 MIN_SEP = 1.45
 CHEST = 0.4
@@ -153,21 +154,31 @@ def pick_subset(robots: list[bpy.types.Object], rng: random.Random) -> list[bpy.
 
 
 def point_on_loop(waypoints: tuple[tuple[float, float], ...], t: float) -> tuple[float, float]:
-    total = 0.0
-    segs: list[tuple[tuple[float, float], tuple[float, float], float]] = []
+    """恒速走一圈，在每个 waypoint 停 DWELL_S 秒——模拟打药/驻守/瞄准。
+
+    停顿让雷达有 >3s 连续可见窗口（P 达标线 ~3s @5Hz 连击），
+    不停顿的话步兵只有 ~1.7s 可见、P 永远到不了 100。
+    t 直接是秒；周期 = Σ(段长/速度) + n×停顿。
+    """
     n = len(waypoints)
+    segs: list[tuple[tuple[float, float], tuple[float, float], float]] = []
+    total_time = 0.0
     for i, start in enumerate(waypoints):
         end = waypoints[(i + 1) % n]
         length = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
-        segs.append((start, end, length))
-        total += length
-    dist = (SPEED_MPS * t) % total
-    walked = 0.0
-    for start, end, length in segs:
-        if dist <= walked + length or length <= 0.0:
-            frac = 0.0 if length <= 0.0 else (dist - walked) / length
+        walk_time = length / SPEED_MPS
+        segs.append((start, end, walk_time))
+        total_time += walk_time + DWELL_S
+    phase = t % total_time
+    elapsed = 0.0
+    for start, end, walk_time in segs:
+        if phase <= elapsed + walk_time:
+            frac = max(0.0, min(1.0, (phase - elapsed) / walk_time)) if walk_time > 0.0 else 0.0
             return start[0] + frac * (end[0] - start[0]), start[1] + frac * (end[1] - start[1])
-        walked += length
+        elapsed += walk_time
+        if phase <= elapsed + DWELL_S:
+            return end  # 停在 waypoint
+        elapsed += DWELL_S
     return waypoints[0]
 
 
