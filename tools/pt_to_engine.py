@@ -1,4 +1,12 @@
-"""把 Ultralytics YOLO .pt 导出为 TensorRT .engine。填好 PT_PATH 后直接运行。"""
+"""把 Ultralytics YOLO .pt 导出为 TensorRT .engine。
+
+默认走 weights/ 里的 car_best；装甲导出用环境变量指路径：
+
+    $env:YOLO_PT="runs/detect/<run>/weights/best.pt"
+    $env:YOLO_ENGINE="weights/armor_best.engine"
+    $env:YOLO_IMGSZ="192"; $env:YOLO_BATCH="8"
+    python tools/pt_to_engine.py
+"""
 
 from __future__ import annotations
 
@@ -14,15 +22,16 @@ os.environ["PATH"] = os.pathsep.join(
 import ultralytics
 from ultralytics import YOLO
 
-# ========== 填这里 ==========
-PT_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\weights\car_best.pt"
-ENGINE_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\weights\car_best.engine"
-IMGSZ = 1280  # 装甲板 192，车辆 1280
-BATCH = 1  # 车=1；装甲导出改 8，多 ROI 一次 enqueue
-DEVICE = 0
+_ROOT = Path(__file__).resolve().parents[1]
+# ========== 默认值，环境变量可覆盖 ==========
+PT_PATH = os.environ.get("YOLO_PT", str(_ROOT / "weights" / "car_best.pt"))
+ENGINE_PATH = os.environ.get("YOLO_ENGINE", str(_ROOT / "weights" / "car_best.engine"))
+IMGSZ = int(os.environ.get("YOLO_IMGSZ", "1280"))  # 装甲板 192，车辆 1280
+BATCH = int(os.environ.get("YOLO_BATCH", "1"))  # 车=1；装甲导出改 8
+DEVICE = int(os.environ.get("YOLO_DEVICE", "0"))
 HALF = True  # TensorRT FP16（ONNX 先出 half，再交给 TRT 11 strongly-typed）
 WORKSPACE = None  # GiB；None 用 TensorRT 默认
-# ===========================
+# ===========================================
 
 
 def _names_table(raw: dict[int, str] | list[str]) -> dict[int, str]:
