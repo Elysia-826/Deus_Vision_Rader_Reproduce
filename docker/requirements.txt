@@ -1,0 +1,25 @@
+"""Docker 环境的 Python 依赖清单。容器内 pip install -r requirements.txt。
+
+与 Windows 开发环境一致的版本（从当前环境导出核心依赖）。
+TensorRT 走 nvidia 官方 pip 轮子，不需要 apt。
+"""
+
+# GPU 推理
+tensorrt>=10.0  # Blackwell 需要 10+；pip 轮子自带 CUDA runtime
+numpy>=1.24
+
+# YOLO 推理 + 训练
+ultralytics>=8.3.0
+
+# 视觉基础
+opencv-python-headless>=4.8.0  # headless：容器内不需要 GUI
+
+# 配置解析
+pydantic>=2.0
+
+# 训练（可选，按需启用）
+torch>=2.5.0  # 容器内可从 PyTorch 官方 cu128 轮子覆盖
+torchvision>=0.20.0
+
+# 测试
+pytest>=8.0

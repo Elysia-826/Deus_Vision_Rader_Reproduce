@@ -1,0 +1,52 @@
+# ──────────────────────────────────────────────────────────────
+# Deus Vision Radar — Docker Compose
+# 推理/训练/测试 一键启动
+#
+# 前提：宿主机已装 Docker + NVIDIA Container Toolkit
+#   curl -fsSL https://get.docker.com | sh
+#   apt-get install -y nvidia-container-toolkit
+#   nvidia-ctk runtime configure --runtime=docker
+#   systemctl restart docker
+#
+# 使用：
+#   docker compose run --rm radar pytest
+#   docker compose run --rm radar python scripts/run_radar.py
+#   docker compose run --rm radar python -m models.train car --data models/configs/data_car.yaml
+# ──────────────────────────────────────────────────────────────
+
+services:
+  radar:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: deus-radar
+    container_name: deus-radar
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - RADAR_SOURCE=${RADAR_SOURCE:-images}
+      - RADAR_HEADLESS=1
+      - RADAR_REFEREE_STUB=1
+      - RADAR_SEND_LOST=1
+      - RADAR_IMAGES_DIR=/workspace/scene/locate_out/videoseq_dwell
+      - RADAR_IDENTITY_LOG=/workspace/scene/locate_out/identity_log.jsonl
+    volumes:
+      # 项目根目录挂载到容器 /workspace
+      - ..:/workspace
+      # 权重目录（.engine 文件在容器内首次使用时自动重编译）
+      # 如果权重目录在项目内则无需单独挂载
+      # - ./weights:/workspace/weights:ro
+    # USB 设备（相机 + 裁判串口，真机联调时取消注释）
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0  # 裁判串口
+    #   - /dev/bus/usb:/dev/bus/usb  # 海康相机
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # 交互式使用（训练/调试）
+    stdin_open: true
+    tty: true
