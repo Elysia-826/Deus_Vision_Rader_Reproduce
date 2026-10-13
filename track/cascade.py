@@ -252,11 +252,11 @@ def _note_bot(slot: _Slot, obs: FieldObservation, status: PatternStatus) -> None
 
 
 def _visible(slot: _Slot) -> bool:
-    """发布条件 = 状态机还在讲这台车 + 位置还在场上。
+    """发布条件 = 状态机还在讲这台车 + 位置还在场上 + 身份投票大致认同本槽。
 
-    车不可能出场地：外推漂出场（x 越过 ±14.5 等）说明这轨道已经死了，
-    画到小地图场外、发给裁判都只会是错的。内部 Kalman 不杀，车再冒头
-    还能靠匹配续上。
+    身份发布门：R3 槽吃着英雄的观测、发英雄的坐标当步兵坐标——比不发
+    还糟 5 倍（错发 5Hz 每包扣 x，静默 0.5s 才扣一次中断）。槽自己的
+    历史票是证据：近窗顶票 ≥0.7 都在说「我是别的兵种」就静默。
     """
     match slot.phase:
         case TrackPhase.CONFIRMED:
@@ -270,7 +270,27 @@ def _visible(slot: _Slot) -> bool:
             return False
         case unreachable:
             assert_never(unreachable)
-    return _on_field_publish(slot.filt.x, slot.filt.y)
+    if not _on_field_publish(slot.filt.x, slot.filt.y):
+        return False
+    return _identity_publishable(slot)
+
+
+_PUBLISH_GATE_FRACTION: Final = 0.7  # 近窗顶票占比 ≥0.7 在说别的兵种 → 静默
+_PUBLISH_GATE_MIN_VOTES: Final = 3  # 至少 3 票才够格说「认同/不认同」
+
+
+def _identity_publishable(slot: _Slot) -> bool:
+    """槽自己的票强烈反对本槽身份时不发布——错发比静默伤害大 5 倍。
+
+    跟背叛判死不同：不杀槽（Kalman 保留），只屏蔽输出。车换回来时
+    近窗指数加权投票会在几帧内翻回正确身份，发布自动恢复。
+    """
+    if len(slot.role_hist) < _PUBLISH_GATE_MIN_VOTES:
+        return True
+    role, fraction = _weighted_argmax(slot.role_hist)
+    if role is not None and role is not slot.slot.role and fraction >= _PUBLISH_GATE_FRACTION:
+        return False
+    return True
 
 
 _PUBLISH_MARGIN_M: Final = 0.5  # 真车最大半长；观测侧的 2m 宽容度不该带进发布
