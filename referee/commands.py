@@ -214,6 +214,49 @@ def encode_robot_interaction(
     return head + content
 
 
+# ---------- 雷达→哨兵引导（0x0301 子内容 0x0200 机器人间通信） ----------
+
+SUB_ROBOT_TO_ROBOT: Final[int] = 0x0200  # 0x0200~0x02FF：机器人间通信
+BLUE_SENTRY_ID: Final[int] = 107
+RED_SENTRY_ID: Final[int] = 7
+
+
+def encode_sentry_guidance(
+    marks: tuple[MapMark | None, ...],
+) -> bytes:
+    """打包敌方位置发给己方哨兵（≤30Hz，与 0x0305 共享带宽）。
+
+    内容格式（自定协议，哨兵侧需匹配解码）：
+      uint8 数量 N
+      N × (uint16 x_cm, uint16 y_cm)  裁判图坐标 cm
+    最大 1 + 6×4 = 25B，远小于 112B 上限。
+    """
+    enemy_marks = marks[:6]  # 只发敌方（前 6 槽）
+    content = bytearray()
+    valid = [m for m in enemy_marks if m is not None]
+    content.append(len(valid))
+    for mark in valid:
+        content += mark.x_cm.to_bytes(2, "little")
+        content += mark.y_cm.to_bytes(2, "little")
+    return bytes(content)
+
+
+def decode_sentry_guidance(content: bytes) -> tuple[MapMark, ...]:
+    """哨兵侧解包雷达引导。stub/测试用。"""
+    if not content:
+        return ()
+    n = content[0]
+    marks: list[MapMark] = []
+    for i in range(n):
+        off = 1 + i * 4
+        if off + 4 > len(content):
+            break
+        x_cm = int.from_bytes(content[off : off + 2], "little")
+        y_cm = int.from_bytes(content[off + 2 : off + 4], "little")
+        marks.append(MapMark(x_cm=x_cm, y_cm=y_cm))
+    return tuple(marks)
+
+
 @dataclass(frozen=True, slots=True)
 class GameStatus:
     """0x0001。game_progress：0 未开始 1 准备 2 自检 3 倒计时 4 比赛中 5 结算。"""

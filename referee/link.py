@@ -22,8 +22,11 @@ from referee.commands import (
     CMD_ROBOT_HP,
     CMD_ROBOT_INTERACTION,
     SUB_RADAR_DECISION,
+    SUB_ROBOT_TO_ROBOT,
     BLUE_RADAR_ID,
+    BLUE_SENTRY_ID,
     RED_RADAR_ID,
+    RED_SENTRY_ID,
     SERVER_ID,
     GameStatus,
     MapMark,
@@ -34,6 +37,7 @@ from referee.commands import (
     encode_map_positions,
     encode_radar_decision_content,
     encode_robot_interaction,
+    encode_sentry_guidance,
     parse_game_status,
     parse_mark_progress,
     parse_radar_info,
@@ -91,6 +95,18 @@ class RefereeLink:
         """消耗一次双倍易伤机会。计数单调 +1，uint8 饱和；有没有机会看 0x020E 反馈。"""
         self._double_counter = min(self._double_counter + 1, 0xFF)
         self._send_radar_decision(PasswordAction.NONE, "000000")
+
+    def send_sentry_guidance(self, marks: tuple[MapMark | None, ...]) -> None:
+        """把敌方位置通过 0x0301 机器人间通信发给己方哨兵。
+
+        与 0x0305（小地图标记）共享 0x0301 命令的 30Hz 带宽。
+        marks 是 12 槽（marks_from_publishes 输出），只取敌方前 6 槽。
+        哨兵侧按 encode_sentry_guidance 的自定格式解码。
+        """
+        sentry_id = RED_SENTRY_ID if self._own_team is Team.RED else BLUE_SENTRY_ID
+        content = encode_sentry_guidance(marks)
+        payload = encode_robot_interaction(SUB_ROBOT_TO_ROBOT, self._self_id, sentry_id, content)
+        self._send(CMD_ROBOT_INTERACTION, payload)
 
     def update_own_password(self, password: str) -> None:
         """改己方密钥。仅开局和对方破解成功后有效（0x020E bit5 可改时）。"""

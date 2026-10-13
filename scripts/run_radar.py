@@ -87,6 +87,8 @@ HIK_URL = os.environ.get("RADAR_HIK_URL", "0")  # 默认 USB 第 0 路
 # stub 裁判阶段压缩：1.0=真实时长（准备3min+自检15s+倒计时5s+战斗7min）。
 # 0.05 → 准备 9s+自检 0.75s+倒计时 0.25s+战斗 21s——回放 20s 序列能测到阶段切换。
 PHASE_SCALE = float(os.environ.get("RADAR_PHASE_SCALE", "0.05"))
+# RADAR_SENTRY_GUIDE=1：通过 0x0301 机器人间通信把敌方位置发给己方哨兵。
+SENTRY_GUIDE = os.environ.get("RADAR_SENTRY_GUIDE", "0") == "1"
 # =========================
 
 ImageU8 = NDArray[uint8]
@@ -393,10 +395,10 @@ def main() -> None:
                 referee_stub.set_phase_scale(PHASE_SCALE)
                 print("run_radar referee own_team", referee_own.value, "phase_scale", PHASE_SCALE, flush=True)
             referee_stub.set_truth(truth)
-            referee_link.send_map(
-                marks_from_publishes(referee_own, publishes, include_lost=SEND_LOST),
-                now_s=t_sim,
-            )
+            _marks = marks_from_publishes(referee_own, publishes, include_lost=SEND_LOST)
+            referee_link.send_map(_marks, now_s=t_sim)
+            if SENTRY_GUIDE:
+                referee_link.send_sentry_guidance(_marks)
             referee_stub.step(now_s=t_sim)
             radar_info_state: RadarInfo | None = None
             mark_state: MarkProgress | None = None
