@@ -332,3 +332,6 @@ locate/calib/match_homography.json
 
 # 官方文档本地副本（协议/规则 PDF 与文本提取）。版权属大疆，只留本地不进 git。
 refs/
+
+# ��ģ�鹤��Ŀ¼������ AI/���߲��������� git��
+zaowu_audit/
