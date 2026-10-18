@@ -25,14 +25,14 @@ from locate.types import Pixel, WorldXYZ
 
 CAMERA_JSON = _ROOT / "locate" / "calib" / "Camera_Radar_Blue.json"
 
-# 仿真场景的固定建筑（Blender 真值坐标，非共线、带高度差；全部在蓝雷达画面内）。
+# RM2027 场景固定建筑（蓝雷达画面内、非共线、三层高度差、y 轴 ±7m 展开）。
 LANDMARKS: tuple[WorldXYZ, ...] = (
-    WorldXYZ(x=0.0, y=0.0, z=0.68),      # 能量机关底座
-    WorldXYZ(x=0.99, y=1.04, z=1.82),    # 能量机关立柱 1
-    WorldXYZ(x=-0.99, y=-0.95, z=1.83),  # 能量机关立柱 2
-    WorldXYZ(x=0.47, y=0.0, z=0.89),     # 蓝科技核心灯
-    WorldXYZ(x=-13.42, y=0.0, z=2.5),    # 红侧雷达基座
-    WorldXYZ(x=-13.77, y=0.9, z=2.8),    # 红侧云台预留台
+    WorldXYZ(x=5.5, y=0.0, z=1.2),     # 蓝前哨站顶（中场高度）
+    WorldXYZ(x=-5.5, y=0.0, z=1.2),    # 红前哨站顶（远场高度）
+    WorldXYZ(x=0.0, y=0.0, z=1.5),     # 能量机关中心（最高点）
+    WorldXYZ(x=0.0, y=7.0, z=0.5),     # 左机库地面（图像右侧、y 展开）
+    WorldXYZ(x=0.0, y=-7.0, z=0.5),    # 右机库地面（图像左侧、y 展开）
+    WorldXYZ(x=-11.0, y=-5.0, z=0.5),  # 红方堡垒（远端角 + 侧偏）
 )
 NOISE_PX: tuple[float, ...] = (0.0, 2.0, 5.0, 10.0)
 

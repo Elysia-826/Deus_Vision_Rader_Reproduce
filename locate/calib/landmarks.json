@@ -1,11 +1,12 @@
-{
-  "comment": "RMUC2026 28x15 m, origin at center, +x blue side (radar ~x=13). Edit field x/y to the year's official figure. Click the GROUND footprint, not armor plates.",
-  "click_order": ["outpost_blue", "outpost_red", "energy", "base_blue"],
+﻿{
+  "comment": "RM2027 28x15 m, origin at center, +x blue side (radar ~x=14.6). Non-collinear set: 3 elevated + 3 ground. Click the TOP/PEAK of each structure for best conditioning.",
+  "click_order": ["outpost_blue", "outpost_red", "energy", "hangar_left", "hangar_right", "fortress_red"],
   "landmarks": [
-    {"id": "outpost_blue", "name_zh": "蓝前哨站", "x": 5.5, "y": 0.0},
-    {"id": "outpost_red", "name_zh": "红前哨站", "x": -5.5, "y": 0.0},
-    {"id": "energy", "name_zh": "能量机关", "x": 0.0, "y": 0.0},
-    {"id": "base_blue", "name_zh": "蓝方基地", "x": 12.5, "y": 0.0},
-    {"id": "base_red", "name_zh": "红方基地", "x": -12.5, "y": 0.0}
+    {"id": "outpost_blue", "name_zh": "蓝前哨站顶", "x": 5.5, "y": 0.0, "z": 1.2},
+    {"id": "outpost_red", "name_zh": "红前哨站顶", "x": -5.5, "y": 0.0, "z": 1.2},
+    {"id": "energy", "name_zh": "能量机关中心", "x": 0.0, "y": 0.0, "z": 1.5},
+    {"id": "hangar_left", "name_zh": "左机库地面", "x": 0.0, "y": 7.0, "z": 0.5},
+    {"id": "hangar_right", "name_zh": "右机库地面", "x": 0.0, "y": -7.0, "z": 0.5},
+    {"id": "fortress_red", "name_zh": "红方堡垒", "x": -11.0, "y": -5.0, "z": 0.5}
   ]
 }
