@@ -1,7 +1,7 @@
-"""Blender live video source. --motion off|patrol  --camera Camera_Radar_Blue|Camera_Radar_Red|alternate
+﻿"""Blender live video source. --motion off|patrol  --camera Camera_Radar_Blue|Camera_Radar_Red|alternate
 
 GUI（持续画面，不要 --background）：
-    blender.exe scene/RMUC2026_V2.0.0_radar.blend --python scene/armor_assets/radar_sim_loop.py -- --motion patrol
+    blender.exe scene/RMUC2027_V1.0.0_radar_fixed.blend --python scene/armor_assets/radar_sim_loop.py -- --motion patrol
 数据采集（双相机轮换）加 --camera alternate。
 """
 

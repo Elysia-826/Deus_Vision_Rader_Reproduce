@@ -1,7 +1,7 @@
-# ─── How to run ───
+﻿# ─── How to run ───
 # 先用 Blender dump 相机，再叠检测和小地图：
 #
-#     & "D:\Program Files\blender\blender.exe" scene/RMUC2026_V2.0.0_radar.blend --background --python scene/armor_assets/dump_radar_cameras.py -- --render
+#     & "D:\Program Files\blender\blender.exe" scene/RMUC2027_V1.0.0_radar_fixed.blend --background --python scene/armor_assets/dump_radar_cameras.py -- --render
 #     python scripts/visualize_minimap.py
 # ──────────────────
 

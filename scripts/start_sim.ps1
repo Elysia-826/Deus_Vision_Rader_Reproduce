@@ -1,4 +1,4 @@
-# 同时开 Blender 仿真（车在跑）和检测+小地图窗口。
+﻿# 同时开 Blender 仿真（车在跑）和检测+小地图窗口。
 # 仓库根目录执行：
 #     powershell -File scripts/start_sim.ps1
 #     powershell -File scripts/start_sim.ps1 -Motion off
@@ -10,7 +10,7 @@ param(
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Blender = "D:\Program Files\blender\blender.exe"
-$Blend = Join-Path $Root "scene\RMUC2026_V2.0.0_radar.blend"
+$Blend = Join-Path $Root "scene\RMUC2027_V1.0.0_radar_fixed.blend"
 $Sim = Join-Path $Root "scene\armor_assets\radar_sim_loop.py"
 $Radar = Join-Path $Root "scripts\run_radar.py"
 

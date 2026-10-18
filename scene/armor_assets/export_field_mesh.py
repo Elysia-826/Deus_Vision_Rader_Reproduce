@@ -1,6 +1,6 @@
-"""Export non-robot field triangles for mesh raycast. Does not save the blend.
+﻿"""Export non-robot field triangles for mesh raycast. Does not save the blend.
 
-    blender.exe scene/RMUC2026_V2.0.0_radar.blend --background --python scene/armor_assets/export_field_mesh.py
+    blender.exe scene/RMUC2027_V1.0.0_radar_fixed.blend --background --python scene/armor_assets/export_field_mesh.py
 """
 
 from __future__ import annotations

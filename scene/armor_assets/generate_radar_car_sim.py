@@ -1,6 +1,4 @@
-"""Render radar-view car frames with YOLO labels. Does not save the blend.
-
---motion random  场内随机摆放（旧分布，和实况巡逻对不上）
+﻿"""Render radar-view car frames with YOLO labels. Does not save the blend.`r`n`r`nRun with the fixed 2027 scene (ported from 2026):`r`n    blender.exe scene/RMUC2027_V1.0.0_radar_fixed.blend --background --python scene/armor_assets/generate_radar_car_sim.py -- --motion patrol`r`n`r`n--motion random  场内随机摆放（旧分布，和实况巡逻对不上）
 --motion patrol  复用 radar_sim_loop.PATHS，按 1.5 m/s 沿路径走
 """
 from __future__ import annotations

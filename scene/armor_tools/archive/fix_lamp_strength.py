@@ -1,4 +1,4 @@
-"""把装甲灯条的自发光强度从爆表值降到保色区间。
+﻿"""把装甲灯条的自发光强度从爆表值降到保色区间。
 
 诊断（2026-10）：灯条 Emission Color 本身是饱和红/蓝，但强度乘数 ~40
 把辐射度推到 ~100（HDR），AgX/Filmic 色调映射把超亮高光去饱和成近白
@@ -6,7 +6,7 @@
 降到 2.0：蓝通道辐射度 2.5×2=5，AgX 保色；灯条仍是暗场里最亮的东西。
 
 用法：
-    blender --background scene/RMUC2026_V2.0.0_radar.blend \
+    blender --background scene/RMUC2027_V1.0.0_radar_fixed.blend \
         --python scene/armor_assets/fix_lamp_strength.py -- [--strength 2.0]
 """
 

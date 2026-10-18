@@ -1,8 +1,8 @@
-"""Dump OpenCV K/R/t for Camera_Radar_Blue/Red. Optional: render one GT frame.
+﻿"""Dump OpenCV K/R/t for Camera_Radar_Blue/Red. Optional: render one GT frame.
 
 Run inside Blender, same as generate_radar_car_sim.py:
 
-    blender.exe scene/RMUC2026_V2.0.0_radar.blend --background --python scene/armor_assets/dump_radar_cameras.py -- --render
+    blender.exe scene/RMUC2027_V1.0.0_radar_fixed.blend --background --python scene/armor_assets/dump_radar_cameras.py -- --render
 """
 
 from __future__ import annotations

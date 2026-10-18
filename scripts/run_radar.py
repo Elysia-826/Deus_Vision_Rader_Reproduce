@@ -1,6 +1,6 @@
-# ─── How to run ───
+﻿# ─── How to run ───
 # 终端 1（仿真出图）：
-#     & "D:\Program Files\blender\blender.exe" scene/RMUC2026_V2.0.0_radar.blend --python scene/armor_assets/radar_sim_loop.py -- --motion patrol
+#     & "D:\Program Files\blender\blender.exe" scene/RMUC2027_V1.0.0_radar_fixed.blend --python scene/armor_assets/radar_sim_loop.py -- --motion patrol
 # 终端 2（检测 + 小地图）：
 #     python scripts/run_radar.py
 # SOURCE=video 时不需要 Blender。q 退出。

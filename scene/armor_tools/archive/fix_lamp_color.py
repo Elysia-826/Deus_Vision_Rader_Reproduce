@@ -1,4 +1,4 @@
-"""灯条颜色规格化：纯净发射色 + 适配 Standard 视图变换的强度。
+﻿"""灯条颜色规格化：纯净发射色 + 适配 Standard 视图变换的强度。
 
 Standard 视图变换逐通道截断（爆曝保色，与真实相机一致），所以强度
 可以推高而颜色不丢。但发射色的非主导通道（0.05 的绿色泄漏）在高
@@ -9,7 +9,7 @@ Standard 视图变换逐通道截断（爆曝保色，与真实相机一致）�
 灯条亮度 ~6× 白装甲面，YOLO 能明确抓住。
 
 用法：
-    blender --background scene/RMUC2026_V2.0.0_radar.blend \
+    blender --background scene/RMUC2027_V1.0.0_radar_fixed.blend \
         --python scene/armor_assets/fix_lamp_color.py -- [--strength 6]
 """
 
