@@ -53,10 +53,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--tag", default="render", help="产出文件名前缀（区分不同序列）")
     parser.add_argument("--max-per-class", type=int, default=300)
+    parser.add_argument("--pose", type=Path, default=POSE_BLUE, help="相机外参 JSON（换新场地/新雷达位置后指向新文件）")
+    parser.add_argument("--mesh", type=Path, default=MESH, help="场地网格 npz（换新场地后指向新文件）")
     args = parser.parse_args()
 
-    pose = camera_from_path(POSE_BLUE)
-    mesh = FieldMesh.from_npz(MESH)
+    pose = camera_from_path(args.pose)
+    mesh = FieldMesh.from_npz(args.mesh)
     net, transform, device = vis2._load_classifier()
     detector = vis2._load_detector(vis2.PatternStage(net=net, transform=transform, device=str(device)))
     detector.infer(zeros((3000, 4096, 3), dtype=uint8), persist_tracks=False)  # 预热
