@@ -1,17 +1,17 @@
-# Deus Vision Radar Reproduce
+# Deus Vision Radar
 
-港科大 ENTERPRIZE [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm) 单目雷达复现。骨干 YOLOv12 → YOLO26。当前在 `main`，图案是 MobileNetV3-Small @ 64。
+港科大 [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm) 起步的单目雷达，现已面向 RM2027 独立演进。骨干 YOLO26，图案 MobileNetV3-Small @ 64。场景已切换到 RMUC2027。
 
-当前能跑：车辆 YOLO → 装甲 YOLO → 图案分类；仿真射线定位或上场四点单应；相机画面内嵌小地图；固定兵种槽级联跟踪（身份历史投票 + 转弯自适应过程噪声）。
+操作手册见 [docs/radar_operation.md](docs/radar_operation.md)，2027 迁移计划见 [docs/migration_2027.md](docs/migration_2027.md)。
 
-操作步骤见 [docs/radar_operation.md](docs/radar_operation.md)。
+## 当前能跑
+
+车辆 YOLO → 装甲 YOLO → 图案分类；仿真射线定位或上场 PnP 标定（推荐）；相机画面内嵌小地图（实心=看见、空圈=外推）；固定兵种槽级联跟踪（身份历史投票 + 发布门 + 转弯自适应过程噪声）；裁判 stub 基准（P 公式离线复刻 + 比赛阶段 + 0x0301 哨兵引导）。
 
 ## 分支
 
-- `main`：上场图案是 MobileNetV3-Small @ 64，权重 `weights/pattern_best.engine`。
-- `pattern-efficientnet-b0`：图案对照实验，EfficientNet-B0 @ 96，权重 `weights/pattern_efficientnet_b0.engine`。检测链其余部分与 main 相同。
-
-还没做：海康拉流、裁判串口。
+- `main`：图案 MobileNetV3-Small @ 64，权重 `weights/pattern_best.engine`。
+- `pattern-efficientnet-b0`：图案对照实验，EfficientNet-B0 @ 96。其余与 main 相同。
 
 ## 目录
 
@@ -19,88 +19,124 @@
 detect/            车 → 装甲推理（BoT-SORT 在 detect/trackers/）
 models/            YOLO26 + MobileNetV3 训练
 locate/            像素 → 场地米制 → 俯视图（射线 / 地标单应 / PnP 标定）
-referee/           裁判串口协议骨架 + stub 裁判（RM2026 V1.3.0，未接真机）
-track/             槽位级联跟踪 + 战略猜点
-scripts/           可视化、仿真启动、标定、打分
+referee/           裁判串口协议 + stub 裁判 + 0x0301 哨兵引导 + 双倍易伤策略
+track/             槽位级联跟踪 + 战略猜点 + 身份发布门
+scripts/           运行、标定、打分、诊断（diagnose.py）
 tools/             pt → onnx / TensorRT
 tests/             pytest
-docs/              操作手册
-dataset/           划分脚本（图像不进 git）
+docs/              操作手册、协议笔记、2027 迁移计划
+docker/            Linux GPU 容器（Dockerfile + compose）
+dataset/           收割 + 划分脚本（图像不进 git）
 weights/           本地权重（不进 git）
-scene/             RMUC2026 Blender 仿真（CAD/贴图不进 git）
+scene/             RMUC2027 Blender 仿真（CAD/贴图不进 git）
 refs/              官方协议/规则手册本地留档（不进 git）
 ```
 
-## 和港科大的差异
+## 和参考方案的差异
 
-| | 港科大 | 本仓 |
+| | 港科大 2025 | 本仓 |
 |---|---|---|
 | 车检测 | YOLOv12-s @ 1280 | YOLO26s @ 1280 |
 | 装甲检测 | YOLOv12-n @ 192 | YOLO26n @ 192 |
-| 图案 | MobileNet-V2，带颜色 | `main`：MobileNetV3-Small @ 64；`pattern-efficientnet-b0`：EfficientNet-B0 @ 96。都是 6 类 `(1,2,3,4,S,Q)` |
-| 上场定位 | 像素射线打场地 mesh | 仿真射线；真机四点地标单应 |
+| 图案 | MobileNet-V2，带颜色 | MobileNetV3-Small @ 64，6 类 `(1,2,3,4,S,Q)` |
+| 定位 | 像素射线打场地 mesh | 仿真射线 + 真机 PnP 6 点（推荐）/ 四点单应（备选） |
+| 跟踪 | 匈牙利 + 卡尔曼 | 级联匹配 + 身份投票 + 发布门 + 自适应 Q |
+| 裁判系统 | 有（C++） | Python 骨架 + stub 裁判 + 离线基准 |
+| 哨兵引导 | — | 0x0301 机器人间通信 |
 
 ## 命令（仓库根目录）
 
 ```bash
+# 训练
 python -m models.train car --data models/configs/data_car.yaml
 python -m models.train armor --data models/configs/data_armor.yaml
-python scripts/visualize_two_stage.py
-python scripts/visualize_minimap.py
-python scripts/run_radar.py
-python scripts/calibrate_landmarks.py
+python -m models.pattern --data dataset/pattern_balanced --epochs 30
+
+# 运行（仿真 / 回放 / 真相机）
+python scripts/run_radar.py                                        # Blender 仿真
+RADAR_SOURCE=images RADAR_HEADLESS=1 python scripts/run_radar.py  # 回放
+RADAR_SOURCE=hik RADAR_HIK_URL=0 python scripts/run_radar.py      # USB 相机
+RADAR_SOURCE=hik RADAR_HIK_URL=rtsp://... python scripts/run_radar.py  # RTSP
+
+# 标定
+python scripts/calibrate_pnp.py frame.jpg --intrinsics <K.json>  # 真机 PnP（推荐）
+python scripts/validate_pnp.py                                    # 仿真精度验证
+python scripts/calibrate_landmarks.py                             # 单应（备选）
+
+# 测试
 pytest
 ```
 
-打分（验收与回归）：
+## 打分与诊断
 
 ```bash
-python scripts/eval_foot_ray.py --weights <best.pt>     # 新车权重 1.2 m 底边射线验收
-python scripts/score_identity_log.py [log.jsonl]        # 发布点 vs 真值：召回/误差/野点
-python scripts/score_stage_funnel.py                    # GT→车→装甲→图案 分级漏斗
-python scripts/score_referee.py [log.jsonl]              # stub 裁判基准：易伤秒/准确率/P
-python scripts/validate_pnp.py                           # PnP 标定精度（噪声→端到端误差）
+python scripts/eval_foot_ray.py --weights <best.pt>   # 底边射线验收
+python scripts/score_identity_log.py [log.jsonl]        # 召回/误差/野点
+python scripts/score_stage_funnel.py                    # GT→车→装甲→图案漏斗
+python scripts/score_referee.py [log.jsonl]             # stub 裁判：易伤/准确率/P
+python scripts/diagnose.py --mode conf                  # 图案分类精度
+python scripts/diagnose.py --mode lamp                   # 装甲颜色误读率
+python scripts/diagnose.py --mode confusion             # 槽→GT 混淆表
+python scripts/diagnose.py --mode digits                # 1↔3 数字混淆
 ```
 
-裁判 stub 基准（规则手册 5.6.6 计分公式的离线复刻）：
+## stub 裁判基准
+
+规则手册 P 计分公式的离线复刻（含比赛阶段 + 双倍易伤策略）：
 
 ```bash
-RADAR_REFEREE_STUB=1 RADAR_SEND_LOST=1 python scripts/run_radar.py   # 回放 + stub 打分
-python scripts/score_referee.py                                       # 出易伤报告
+RADAR_REFEREE_STUB=1 RADAR_SEND_LOST=1 python scripts/run_radar.py
+python scripts/score_referee.py
 ```
 
-质量门 A/B 开关：`RADAR_SEND_LOST=1`（LOST 外推也发 0x0305）、`RADAR_GUESS=1`
-（LOST 坐标换战略猜点）。patrol 序列实测：外推 +67% 易伤秒（7.0→11.7s）；
-猜点 −100%（短遮挡场景外推本来就准，固定战略点全错）——所以猜点默认关。
+环境变量：
+- `RADAR_SEND_LOST=1` — LOST 外推也发 0x0305（实测 +67% 易伤秒）
+- `RADAR_GUESS=1` — LOST 坐标换战略猜点（短遮挡场景有害，默认关）
+- `RADAR_PHASE_SCALE=<float>` — 比赛阶段压缩（0.05 → 准备 9s，0.0001 → 准备 18ms）
+- `RADAR_SENTRY_GUIDE=1` — 启用 0x0301 哨兵引导
 
-已知问题（stub 基准量化，按伤害排序）：
+## 环境变量总表
 
-1. **级联换模型不能只换一层**：车 YOLO 重训后 val mAP50 0.942（看起来更好），
-   但下游装甲/图案模型是在旧车检测器的 ROI 上训练的——新车框变了 →
-   ROI 域偏移 → 装甲检出率崩 → 全链失效（union vuln 17.2→0.0s）。
-   **正确做法**：换车模型必须同时用新车模型重新收割装甲/图案数据并重训全链。
-   已回滚到旧车模型，checkpoint 留在 `runs/detect/car-yolo26-2/` 备用。
-2. E3（敌步兵）易伤 6.2s（需停顿行为突破 3s 连续可见窗口）。
-3. 无装甲观测 ~40%：影子喂最近的槽。
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `RADAR_SOURCE` | `blender` | 图源：blender / video / images / hik |
+| `RADAR_HEADLESS` | `0` | 1 = 不弹窗口 |
+| `RADAR_IMAGES_DIR` | `scene/locate_out/videoseq_dwell` | images 源目录 |
+| `RADAR_HIK_URL` | `0` | USB 设备号或 RTSP 地址 |
+| `RADAR_REFEREE_STUB` | `0` | 1 = 启用 stub 裁判 |
+| `RADAR_SEND_LOST` | `0` | 1 = LOST 槽也发标记 |
+| `RADAR_GUESS` | `0` | 1 = LOST 换战略猜点 |
+| `RADAR_PHASE_SCALE` | `0.05` | 比赛阶段时间压缩比 |
+| `RADAR_SENTRY_GUIDE` | `0` | 1 = 0x0301 哨兵引导 |
+| `RADAR_IDENTITY_LOG` | `.../identity_log.jsonl` | identity 日志路径 |
 
-已修复（2026-10 攻坚，基准 7.1→15.2s，准确率 26→47%）：
+## 基准历史
 
-- **双模型仿真域精调**：装甲 YOLO + 图案分类器都用修复后渲染的 crop 重训
-  （渲染收割 611 张图案 + 637 张装甲，含 spin 序列 420 张），合并 2763/7900 张。
-  → 准确率 26→47%（+21pp），错发 72→47%（−25pp），union vuln 7.1→**15.2s**。
-- **装甲 YOLO v1 重训**：dead 类消灭（52→1）、蓝标翻倍（106→212）、观测 +45%。
-- **图案模型 S 淞遗**：S 淞遗归零，幻影哨兵槽消灭。
-- **仿真灯条爆白**：AgX→Standard + 强度 6 + 纯净发射色 → dead 率 50%→0.2%。
-- 基准口径：15.2s（pattern v2 + armor v2 + 修复后渲染）。
+| 场地 | 配置 | union vuln | 准确率 |
+|---|---|---|---|
+| 2026 + 旧模型 | 修复前 | 7.1s | 26% |
+| 2026 + v2 模型 | 修复后 | 15.2s | 47% |
+| 2026 + v3 + 发布门 | + 停顿行为 | **17.2s** | **50.9%** |
+| 2027 + 旧模型 | 新场地直跑 | 9.6s | 44.3% |
 
-基准视频流：`generate_radar_car_sim.py --motion patrol --dt 0.1 [--spin 6.0]` 渲染 10 Hz 固定步长序列（每帧带真值 json），`run_radar.py` 用 `RADAR_SOURCE=images RADAR_HEADLESS=1 RADAR_IMAGES_DIR=... RADAR_IDENTITY_LOG=...` 离线回放打分。同一份序列两次运行逐字节一致。
+> 2027 场地用 2026 训练的模型直跑得 9.6s——d_med 0.02-0.54m 说明新场地更利于检测，
+> 但模型还是旧域的，全链重训后预期显著提升。
 
-Windows 仿真：
+## 2027 遗留项
+
+1. **点阵屏样式未发布** — 图案分类器从零重训被阻塞（最大依赖）
+2. **2027 通信协议未发布** — 0x0305 槽位格式、加固命令字、哨兵消息格式
+3. **全链重训** — 新场地渲染 → 收割 → 车 → 装甲 → 图案，预计 6-8 小时（需 5070 台式机）
+4. **自适应装甲加固** — 2027 全新机制，雷达决策加固中心点（见迁移计划 §6.1）
+5. **哨兵→雷达接收** — 缺接收方向的数据链（见迁移计划 §6.2）
+6. **车模型级联依赖** — 新车模型 checkpoint 不能单独换入（下游 ROI 域偏移会崩链）
+
+## Windows 仿真
 
 ```bat
 scripts\start_sim.cmd
 ```
 
-小地图在 OpenCV 窗口 `radar` 右下角。上场把 `scripts/run_radar.py` 的 `LOCATE_MODE` 改成 `homography`，先跑 `calibrate_landmarks.py`。
+小地图在 OpenCV 窗口 `radar` 右下角（实心=看见，空圈+?=外推）。
 
 权重从 `weights/` 读，不要提交。
