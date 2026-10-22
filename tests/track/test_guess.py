@@ -12,9 +12,13 @@ def _track(
     vx: float = 0.0,
     vy: float = 0.0,
     phase: TrackPhase = TrackPhase.LOST,
+    pos_uncertainty: float = 1.2,  # 默认超标，让 LOST 触发猜点
 ) -> PublishedTrack:
     team = Team.RED if label.startswith("R") else Team.BLUE
-    return PublishedTrack(label=label, team=team, x=x, y=y, phase=phase, bot_id=1, vx=vx, vy=vy)
+    return PublishedTrack(
+        label=label, team=team, x=x, y=y, phase=phase, bot_id=1,
+        vx=vx, vy=vy, pos_uncertainty=pos_uncertainty,
+    )
 
 
 def test_velocity_direction_picks_the_point_ahead() -> None:
@@ -40,11 +44,18 @@ def test_unknown_role_is_left_alone() -> None:
 
 def test_apply_only_touches_lost_slots() -> None:
     confirmed = _track("B1", 3.0, 3.0, phase=TrackPhase.CONFIRMED)
-    lost_far = _track("R1", -12.0, 0.0, vx=-2.0, vy=0.0)  # 英雄朝对家基地走
+    lost_far = _track("R1", -12.0, 0.0, vx=-2.0, vy=0.0, pos_uncertainty=1.2)
     out = apply_guess_to_lost((confirmed, lost_far))
-    assert out[0] == confirmed  # CONFIRMED 不动
-    assert (out[1].x, out[1].y) == (-12.5, 0.0)  # LOST 换成猜点
-    assert out[1].phase is TrackPhase.LOST  # phase 保留：空心点 + LOST 语义
+    assert out[0] == confirmed
+    assert (out[1].x, out[1].y) == (-11.0, -5.0)
+    assert out[1].phase is TrackPhase.LOST
+
+
+def test_low_uncertainty_does_not_trigger_guess() -> None:
+    """协方差门：σ < 0.8m 时外推比猜点准，不覆盖坐标。"""
+    lost_short = _track("R1", -12.0, 0.0, vx=-2.0, vy=0.0, pos_uncertainty=0.3)
+    out = apply_guess_to_lost((lost_short,))
+    assert (out[0].x, out[0].y) == (-12.0, 0.0)
 
 
 def test_guess_points_table_has_every_role() -> None:

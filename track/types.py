@@ -91,6 +91,7 @@ class PublishedTrack:
     bot_id: int | None
     vx: float = 0.0
     vy: float = 0.0
+    pos_uncertainty: float = 0.0  # Kalman σ 位置不确定度（米）；超过 0.8m 不该发标记
 
 
 @dataclass(frozen=True, slots=True)

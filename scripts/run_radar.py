@@ -29,6 +29,8 @@ sys.path.insert(0, str(_SCRIPTS))
 
 import visualize_minimap as vis_map  # noqa: E402
 import visualize_two_stage as vis2  # noqa: E402
+from detect import FrameResult, ImageReadError, PatternStage, warmup  # noqa: E402
+from detect.runtime import load_classifier, load_detector  # noqa: E402
 from locate.camera import camera_from_path  # noqa: E402
 from locate.ray_mesh import FieldMesh  # noqa: E402
 from locate.errors import SourceNotReadyError  # noqa: E402
@@ -99,6 +101,40 @@ class FrameSource(StrEnum):
     VIDEO = "video"
     IMAGES = "images"
     HIK = "hik"
+
+
+def _preflight_gpu() -> None:
+    """启动自检（借鉴 T-DT）：CUDA 不可用时 .engine 加载必然失败，提前给可读错误。
+
+    engine 是 GPU 绑定的（换卡/进 Docker 要重导），把"跑到一半抛 TRT 反序列化
+    错误"提前成一句人话；纯 .pt 配置只警告不拦截（CPU 能跑，慢）。
+    """
+    try:
+        import torch
+
+        cuda_ok = torch.cuda.is_available()
+    except Exception:  # noqa: BLE001 — torch 装坏也该在这里报，而不是后面莫名崩
+        cuda_ok = False
+    if cuda_ok:
+        return
+    weights_dir = _ROOT / "weights"
+    engines = [
+        item
+        for item in (
+            weights_dir / "car_best.engine",
+            weights_dir / "armor_best.engine",
+            weights_dir / "pattern_best.engine",
+        )
+        if item.is_file()
+    ]
+    if engines:
+        names = ", ".join(item.name for item in engines)
+        raise SystemExit(
+            f"preflight FAIL: CUDA 不可用，但存在 TensorRT engine（{names}）。"
+            "engine 是 GPU 绑定的，加载必然失败——先 nvidia-smi 查驱动；"
+            "急用可把 .engine 改名移走，回退 .pt 跑（慢）。"
+        )
+    print("preflight WARN: CUDA 不可用——engine 缺失，将回退 .pt CPU 推理，速度显著下降", flush=True)
 
 
 def _read_meta() -> tuple[int, Path, tuple[SimRobot, ...], str] | None:
@@ -193,7 +229,7 @@ def _slot_bgr(team: Team) -> tuple[int, int, int]:
 
 def overlay(
     frame: ImageU8,
-    result: vis2.FrameResult,
+    result: FrameResult,
     calib,
     minimap: ImageU8,
     truth: tuple[SimRobot, ...],
@@ -243,6 +279,8 @@ def main() -> None:
         case unreachable:
             raise SourceNotReadyError(source=str(unreachable))
 
+    _preflight_gpu()
+
     pose = None
     homography: HomographyMap | None = None
     mesh: FieldMesh | None = None
@@ -261,19 +299,19 @@ def main() -> None:
     calib = minimap_from_path(MINIMAP_JSON)
     minimap = cv2.imread(str(MINIMAP_IMAGE))
     if minimap is None:
-        raise vis2.ImageReadError(MINIMAP_IMAGE)
+        raise ImageReadError(MINIMAP_IMAGE)
 
     cap: cv2.VideoCapture | None = None
     if source is FrameSource.VIDEO:
         cap = cv2.VideoCapture(VIDEO_PATH)
         if not cap.isOpened():
-            raise vis2.ImageReadError(Path(VIDEO_PATH))
+            raise ImageReadError(Path(VIDEO_PATH))
     if source is FrameSource.HIK:
         url = HIK_URL
         # 纯数字当设备号，其余当 RTSP URL
         cap = cv2.VideoCapture(int(url)) if url.isdigit() else cv2.VideoCapture(url)
         if not cap.isOpened():
-            raise vis2.ImageReadError(Path(f"camera:{url}"))
+            raise ImageReadError(Path(f"camera:{url}"))
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -282,12 +320,12 @@ def main() -> None:
     if source is FrameSource.IMAGES:
         img_files = sorted(IMAGES_DIR.glob("*.jpg"))
         if not img_files:
-            raise vis2.ImageReadError(IMAGES_DIR)
+            raise ImageReadError(IMAGES_DIR)
 
     print("run_radar source", source.value, "loading detector…", flush=True)
-    net, transform, device = vis2._load_classifier()
-    detector = vis2._load_detector(vis2.PatternStage(net=net, transform=transform, device=str(device)))
-    vis2.warmup(detector, zeros((3000, 4096, 3), dtype=uint8))
+    net, transform, device = load_classifier()
+    detector = load_detector(PatternStage(net=net, transform=transform, device=str(device)))
+    warmup(detector, zeros((3000, 4096, 3), dtype=uint8))
     last_frame = -1
     camera_name = "Camera_Radar_Blue"
     img_idx = 0
@@ -349,7 +387,7 @@ def main() -> None:
                     print(exc, flush=True)
                     truth = ()
         elif cap is None:
-            raise vis2.ImageReadError(Path(VIDEO_PATH))
+            raise ImageReadError(Path(VIDEO_PATH))
         else:
             ok, frame = cap.read()
             if not ok:
@@ -383,7 +421,13 @@ def main() -> None:
             dt_s = img_dt
         last_tick = now
         t_sim = 0.0 if first_tick else t_sim + dt_s
-        publishes = tracker.step(observations_from_result(result, pose, homography, mesh), dt_s)
+        publishes = tracker.step(
+            observations_from_result(
+                result, pose, homography, mesh,
+                own_team=Team.BLUE if "Blue" in camera_name else Team.RED,
+            ),
+            dt_s,
+        )
         if GUESS_LOST:
             publishes = apply_guess_to_lost(publishes)
         if REFEREE_STUB:

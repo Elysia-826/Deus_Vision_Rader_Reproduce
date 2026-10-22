@@ -1,6 +1,6 @@
 """全图车辆 YOLO → ROI 装甲 YOLO →（可选）图案分类。
 
-阈值：车 conf 0.45 / 1280 / max_det 10（仿真塔误检大约在 0.3）；装甲 conf 0.3 / 192 / max_det 1。
+阈值：车 conf 0.45 / 1280 / max_det 10（仿真塔误检大约在 0.3）；装甲 conf 0.3 / 192 / max_det 3。
 车级开 BoT-SORT：雷达相机常俯仰扫场，ByteTrack 没有 GMC，全图一平移就集体换 ID。
 装甲级只用 predict：裁剪没有帧间连续性，persist 只会串 ID。
 
@@ -97,7 +97,7 @@ def default_config(car_weights: str, armor_weights: str, device: str = "0") -> T
             device=device,
             tracker=str(CAR_TRACKER_YAML),
         ),
-        armor=StageInferConfig(imgsz=192, conf=0.3, iou=0.4, max_det=1, device=device),
+        armor=StageInferConfig(imgsz=192, conf=0.3, iou=0.4, max_det=3, device=device),
     )
 
 

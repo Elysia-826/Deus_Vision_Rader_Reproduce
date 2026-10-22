@@ -178,6 +178,7 @@ class CascadeMatchTracker:
                         bot_id=slot.bot_id,
                         vx=slot.filt.vx,
                         vy=slot.filt.vy,
+                        pos_uncertainty=slot.filt.pos_uncertainty,
                     )
                 )
         return tuple(published)

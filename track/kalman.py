@@ -74,6 +74,11 @@ class PlanarKalman:
     def vy(self) -> float:
         return float(self._state[3])
 
+    @property
+    def pos_uncertainty(self) -> float:
+        """位置不确定度：σ = sqrt(σx² + σy²)。超过 0.8m（准确线）就不该发坐标。"""
+        return float(np.sqrt(self._cov[0, 0] + self._cov[1, 1]))
+
 
 def _motion(dt_s: float) -> FloatMat:
     return np.array(
