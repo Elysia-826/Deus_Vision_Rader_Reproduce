@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import math
+
 import pytest
 
 from track.cascade import CascadeMatchTracker
@@ -137,3 +139,44 @@ def test_dead_flicker_never_kills_the_slot() -> None:
             (_obs(1, 1.0 + 0.01 * index, 0.0, Team.RED, Role.THREE, armor_dead=dead),), dt_s=1.0
         )
         assert any(item.label == "R3" for item in out)
+
+
+def test_ally_hint_penalizes_enemy_slot_for_nearby_ally() -> None:
+    """哨兵盟友提示：盟友位置附近的车不进敌方槽。
+
+    场景：红方步兵在 (-5, 0)（R3 CONFIRMED），蓝方车在 (5, 0) 附近
+    被灯条误读成红色。哨兵说盟友在 (5.2, 0)。位置先验应阻止
+    (5, 0) 处的观测把 R3 拉过去——R3 应该留在 (-5, 0) 附近。
+    """
+    tracker = CascadeMatchTracker()
+    # R3 在远端确认（远离盟友提示点）
+    for x in (-5.5, -5.0, -4.5):
+        tracker.step((_obs(1, x, 0.0, Team.RED, Role.THREE),), dt_s=1.0)
+    # 设盟友提示：蓝方车在 (5, 0) 附近
+    tracker.set_ally_hints(((5.2, 0.0),))
+    # 灯条误读为红色的观测出现在盟友提示点附近
+    out = tracker.step(
+        (_obs(9, 5.1, 0.1, Team.RED, Role.THREE),),  # bot_id=9（新的 BoT-SORT track）
+        dt_s=1.0,
+    )
+    # R3 的位置不应跳到 (5, 0) 附近——应该在远端继续外推
+    for item in out:
+        if item.label == "R3":
+            assert item.x < 0, f"R3 shouldn't jump to ally position: x={item.x}"
+
+
+def test_ally_hint_bonus_helps_ally_slot_matching() -> None:
+    """哨兵盟友提示加分：盟友附近的同阵营观测更容易进正确的盟友槽。"""
+    tracker = CascadeMatchTracker()
+    # B3 先确认
+    for x in (4.5, 5.0, 5.2):
+        tracker.step((_obs(2, x, 0.0, Team.BLUE, Role.THREE),), dt_s=1.0)
+    # 设盟友提示（就在 B3 附近）
+    tracker.set_ally_hints(((5.3, 0.0),))
+    # B3 观测继续——应该稳定跟踪
+    out = tracker.step(
+        (_obs(2, 5.3, 0.0, Team.BLUE, Role.THREE),),
+        dt_s=1.0,
+    )
+    b3 = [item for item in out if item.label == "B3"]
+    assert b3, "B3 should still be tracked with ally hint"

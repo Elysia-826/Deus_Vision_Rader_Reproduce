@@ -146,22 +146,28 @@ def marks_from_publishes(
     publishes: tuple[PublishedTrack, ...],
     *,
     include_lost: bool = False,
+    priority_slots: frozenset[int] = frozenset(),
 ) -> tuple[MapMark | None, ...]:
     """跟踪发布 → 12 个 0x0305 槽。质量门：默认只发 CONFIRMED。
 
     include_lost=True 时 LOST（卡尔曼外推中）也发——只在基准证明外推误差
     中位数 < 0.8m 准确线时才考虑打开；错发比不发扣得更快（x 连击清零）。
     TENTATIVE 一律不发：两帧确认前的身份不可信。
+
+    priority_slots：规则 §5.1.5.4——敌方定位模块离线时，我方发的任何
+    坐标都判「准确」（免费 P）。检测到离线目标的槽加入此集合后，
+    即使 LOST/低置信也发坐标（反正怎么发都算准）。
     """
     marks: list[MapMark | None] = [None] * 12
     for publish in publishes:
-        if publish.phase is TrackPhase.TENTATIVE:
-            continue
-        if publish.phase is TrackPhase.LOST and not include_lost:
-            continue
         slot = slot_index_of(own_team, publish.team, publish.label)
         if slot is None:
             continue  # Q（前哨）不进 0x0305
+        if publish.phase is TrackPhase.TENTATIVE:
+            continue
+        is_lost = publish.phase is TrackPhase.LOST
+        if is_lost and not include_lost and slot not in priority_slots:
+            continue  # LOST 但不在优先集合 → 不发
         marks[slot] = mark_from_field(publish.x, publish.y)
     return tuple(marks)
 

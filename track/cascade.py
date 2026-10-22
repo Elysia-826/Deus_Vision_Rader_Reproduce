@@ -31,6 +31,10 @@ BOT_BONUS: Final = 0.8
 PATTERN_BONUS: Final = 0.2
 PATTERN_PENALTY: Final = 0.35
 TEAM_PENALTY: Final = 0.5
+# 哨兵盟友提示代价（规则 §3.2.3：雷达只能收哨兵的数据）
+ALLY_HINT_M: Final = 2.0     # 距哨兵报的盟友位置 <2m 视为「在盟友附近」
+ALLY_HINT_PENALTY: Final = 0.4  # 盟友附近的车想进敌方槽 → 加罚（更可能被误读）
+ALLY_HINT_BONUS: Final = 0.3   # 盟友附近的车想进盟友槽 → 减罚（可信度高）
 # 身份时序聚合（港科大 type.py 同思路）：每槽记最近 30 帧的灯队/兵种票，
 # 取最近 10 帧指数加权（τ=0.5）出分布。小陀螺下单帧 dead/错标翻不动已确认槽。
 _HIST_LEN: Final = 30
@@ -76,6 +80,17 @@ class CascadeMatchTracker:
 
     def __init__(self) -> None:
         self._slots = [_Slot(slot) for slot in all_slots()]
+        self._ally_hints: tuple[tuple[float, float], ...] = ()
+
+    def set_ally_hints(self, positions: tuple[tuple[float, float], ...]) -> None:
+        """哨兵回传的己方机器人位置提示（场地米制）。
+
+        规则 §3.2.3：雷达只能接收哨兵的数据。哨兵把己方坐标发给雷达后，
+        匹配代价里用这些提示区分敌我——观测在盟友提示点附近却想进敌方
+        槽时加惩罚（盟友被灯条误读成敌方色），想进盟友槽时减代价。
+        协议未发布前留空，融合层到位后直接调用此接口。
+        """
+        self._ally_hints = positions
 
     def step(self, observations: tuple[FieldObservation, ...], dt_s: float) -> tuple[PublishedTrack, ...]:
         """预测，再全局分配，再发布仍确认或仍在外推的槽。"""
@@ -103,7 +118,7 @@ class CascadeMatchTracker:
         if not observations:
             return ()
         cost = [
-            [_pair_cost(slot, obs) for obs in observations]
+            [_pair_cost(slot, obs, self._ally_hints) for obs in observations]
             for slot in self._slots
         ]
         return min_cost_pairs(cost)
@@ -201,7 +216,7 @@ def pattern_status(slot: _Slot, obs: FieldObservation) -> PatternStatus:
     return PatternStatus.CONFLICT
 
 
-def _pair_cost(slot: _Slot, obs: FieldObservation) -> float:
+def _pair_cost(slot: _Slot, obs: FieldObservation, ally_hints: tuple[tuple[float, float], ...]) -> float:
     status = pattern_status(slot, obs)
     match slot.phase:
         case TrackPhase.INACTIVE:
@@ -211,12 +226,17 @@ def _pair_cost(slot: _Slot, obs: FieldObservation) -> float:
                 return REJECT
             return 1.0 - obs.pattern_conf
         case TrackPhase.TENTATIVE | TrackPhase.CONFIRMED | TrackPhase.LOST:
-            return _active_cost(slot, obs, status)
+            return _active_cost(slot, obs, status, ally_hints)
         case unreachable:
             assert_never(unreachable)
 
 
-def _active_cost(slot: _Slot, obs: FieldObservation, status: PatternStatus) -> float:
+def _active_cost(
+    slot: _Slot,
+    obs: FieldObservation,
+    status: PatternStatus,
+    ally_hints: tuple[tuple[float, float], ...],
+) -> float:
     dist = ((slot.filt.x - obs.x) ** 2 + (slot.filt.y - obs.y) ** 2) ** 0.5
     if dist > MATCH_GATE_M:
         return REJECT
@@ -234,6 +254,14 @@ def _active_cost(slot: _Slot, obs: FieldObservation, status: PatternStatus) -> f
             assert_never(unreachable)
     if obs.team is not None and obs.team is not slot.slot.team:
         cost += TEAM_PENALTY
+    # 哨兵盟友提示：观测在已知盟友位置附近时，敌我归属的可信度更高
+    if ally_hints and obs.team is not None:
+        near_ally = any(math.hypot(obs.x - hx, obs.y - hy) < ALLY_HINT_M for hx, hy in ally_hints)
+        if near_ally:
+            if obs.team is slot.slot.team:
+                cost -= ALLY_HINT_BONUS  # 盟友附近 + 同阵营 → 可信匹配
+            else:
+                cost += ALLY_HINT_PENALTY  # 盟友附近 + 异阵营 → 可能被误读
     return cost
 
 
