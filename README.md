@@ -91,7 +91,7 @@ python scripts/score_referee.py
 
 环境变量：
 - `RADAR_SEND_LOST=1` — LOST 外推也发 0x0305（实测 +67% 易伤秒）
-- `RADAR_GUESS=1` — LOST 坐标换战略猜点（短遮挡场景有害，默认关）
+- `RADAR_GUESS=1` — LOST ≥0.5s（中断线）后坐标换战略猜点；幽灵发布窗内真实可触发，近似点位表下净值中性，默认关
 - `RADAR_PHASE_SCALE=<float>` — 比赛阶段压缩（0.05 → 准备 9s，0.0001 → 准备 18ms）
 - `RADAR_SENTRY_GUIDE=1` — 启用 0x0301 哨兵引导
 
@@ -105,7 +105,8 @@ python scripts/score_referee.py
 | `RADAR_HIK_URL` | `0` | USB 设备号或 RTSP 地址 |
 | `RADAR_REFEREE_STUB` | `0` | 1 = 启用 stub 裁判 |
 | `RADAR_SEND_LOST` | `0` | 1 = LOST 槽也发标记 |
-| `RADAR_GUESS` | `0` | 1 = LOST 换战略猜点 |
+| `RADAR_GUESS` | `0` | 1 = LOST ≥0.5s 换战略猜点（时长门 + σ 副门） |
+| `RADAR_CAMERA_NAME` | `Camera_Radar_Blue` | 真机相机名（红方上场必须设 Red，决定外参 + 颜色先验） |
 | `RADAR_PHASE_SCALE` | `0.05` | 比赛阶段时间压缩比 |
 | `RADAR_SENTRY_GUIDE` | `0` | 1 = 0x0301 哨兵引导 |
 | `RADAR_IDENTITY_LOG` | `.../identity_log.jsonl` | identity 日志路径 |
@@ -118,6 +119,7 @@ python scripts/score_referee.py
 | 2026 + v2 模型 | 修复后 | 15.2s | 47% |
 | 2026 + v3 + 发布门 | + 停顿行为 | **17.2s** | **50.9%** |
 | 2027 + 旧模型 | 新场地直跑 | 9.6s | 44.3% |
+| 2027 + 双寿命跟踪 + 多装甲投票 | 幽灵发布窗 + 时长门猜点 + 离线优先接线 | 9.6s | 48.0% |
 
 > 2027 场地用 2026 训练的模型直跑得 9.6s——d_med 0.02-0.54m 说明新场地更利于检测，
 > 但模型还是旧域的，全链重训后预期显著提升。
