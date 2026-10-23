@@ -92,6 +92,7 @@ class PublishedTrack:
     vx: float = 0.0
     vy: float = 0.0
     pos_uncertainty: float = 0.0  # Kalman σ 位置不确定度（米）；超过 0.8m 不该发标记
+    lost_s: float = 0.0  # 丢失后经过的秒数（CONFIRMED=0）。猜点切换门用它，不信协方差
 
 
 @dataclass(frozen=True, slots=True)

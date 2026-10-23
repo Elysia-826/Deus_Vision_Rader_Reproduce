@@ -104,6 +104,31 @@ def test_marks_from_publishes_filters_lost_by_default() -> None:
     assert marks_from_publishes(Team.RED, (lost,), include_lost=True)[0] is not None
 
 
+def test_marks_from_publishes_priority_slot_bypasses_lost_gate() -> None:
+    """§5.1.5.4 离线目标：敌方定位模块离线时任何坐标都判准确——
+    priority_slots 里的槽放行 LOST 标记，白捡 P。不在集合里的照旧拦。"""
+    lost_hero = _publish("B1", Team.BLUE, 0.0, 0.0, TrackPhase.LOST)
+    lost_inf = _publish("B3", Team.BLUE, 1.0, 1.0, TrackPhase.LOST)
+    marks = marks_from_publishes(
+        Team.RED,
+        (lost_hero, lost_inf),
+        priority_slots=frozenset({2}),  # 敌方步3 槽判离线
+    )
+    assert marks[0] is None  # 不在优先集合 → LOST 照旧拦
+    assert marks[2] is not None  # 优先槽 → LOST 放行
+    assert marks[2] == mark_from_field(1.0, 1.0)
+
+
+def test_marks_from_publishes_priority_still_blocks_tentative() -> None:
+    """优先槽也不放行 TENTATIVE：两帧确认前的身份可能是错的，
+    发错槽的标记对一个根本没被判定的机器人毫无意义。"""
+    tentative = _publish("B1", Team.BLUE, 0.0, 0.0, TrackPhase.TENTATIVE)
+    marks = marks_from_publishes(
+        Team.RED, (tentative,), include_lost=True, priority_slots=frozenset({0})
+    )
+    assert marks[0] is None
+
+
 def test_marks_from_publishes_never_sends_tentative() -> None:
     tentative = _publish("B1", Team.BLUE, 0.0, 0.0, TrackPhase.TENTATIVE)
     assert marks_from_publishes(Team.RED, (tentative,), include_lost=True)[0] is None

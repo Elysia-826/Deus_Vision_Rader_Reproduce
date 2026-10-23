@@ -1,13 +1,16 @@
-"""港科大式盲区猜点：外推不确定度超阈值后才把坐标拉回战略城区。
+"""港科大式盲区猜点：外推失效后才把坐标拉回战略城区。
 
 数学同 hkustenterprize/RM2025-Radar-Algorithm 的 guess_pts.py：
   score = w · cos(速度方向, 指向点方向) + (1-w) · exp(-d · 距离衰减)
 
-触发条件（协方差门，2026-10-18 改进）：
-  卡尔曼外推的 σ = sqrt(σx² + σy²) 超过 GUESS_TRIGGER_UNCERTAINTY_M
-  才切猜点。短遮挡（<1s）时外推比固定战略点准得多——实测「一进 LOST
-  就猜」让易伤秒归零。长遮挡（>2-3s）时外推已漂出准确线，战略点
-  反而是更好的先验。
+触发条件（丢失时长门，2026-10-22 改）：
+  lost_s ≥ GUESS_TRIGGER_LOST_S（0.5s，裁判中断线）或 σ ≥ 0.8m。
+  短遮挡（<0.5s）时外推比固定战略点准得多——实测「一进 LOST
+  就猜」让易伤秒归零。0.5s 后连击已被中断判清零，外推误差随
+  t² 发散，战略城区先验开始反超。
+  协方差是副条件：转弯自适应噪声放大时 σ 可能提前过线，同样该切。
+  （旧版只有 σ 门——按现有过程噪声 σ 要 0.73s 才过 0.8m，而
+  COAST=5 帧 @10Hz 只有 0.5s 寿命，门永远开不了，形同虚设。）
 
 点位表是 RM2027 场地特征的近似坐标（场地中心系，+x 蓝侧）。
 2027 官方 CAD 精确坐标发布后按图重填 TODO。
@@ -24,9 +27,12 @@ from track.types import PublishedTrack, Role, TrackPhase
 _GUESS_WEIGHT: Final[float] = 0.003
 _DISTANCE_DECAY: Final[float] = 0.1
 
-# 触发门槛：卡尔曼 σ 超过这条线才允许猜点接管。
-# 0.8m = 裁判「准确」阈值——外推误差如果还在 0.8m 内，
-# 外推比猜点更准（实测中位 0.17m），不该被覆盖。
+# 触发门（主）：丢失时长。0.5s = 裁判中断线——连击已清零，
+# 再发漂移外推只会吃 ERROR；战略点至少有机会落在准确圈内。
+GUESS_TRIGGER_LOST_S: Final[float] = 0.5
+
+# 触发门（副）：卡尔曼 σ 超过准确线 0.8m 时外推已不可信。
+# 转弯自适应噪声（_BOOST_K=2）下可能比时长门先到。
 GUESS_TRIGGER_UNCERTAINTY_M: Final[float] = 0.8
 
 # RM2027 各兵种的候选战略点（场地中心系，米）。
@@ -63,17 +69,21 @@ def guess_field_xy(track: PublishedTrack) -> FieldXY | None:
 
 
 def apply_guess_to_lost(publishes: tuple[PublishedTrack, ...]) -> tuple[PublishedTrack, ...]:
-    """把外推不确定度超标的 LOST 槽坐标替换成猜点。
+    """把外推失效的 LOST 槽坐标替换成猜点。
 
-    协方差门：短遮挡时 σ 很小（0.1-0.3m），外推比固定战略点准 → 不覆盖。
-    长遮挡时 σ 超过 0.8m → 外推已飘出准确线，战略城区先验反而更好 → 接管。
+    丢失时长门：0.5s 内外推还在准确圈（实测中位 0.17m）→ 不覆盖。
+    0.5s 后连击已被中断清零、外推误差随 t² 发散 → 战略城区先验接管。
+    σ 门是副条件：转弯自适应噪声下 σ 可能提前过 0.8m。
     """
     out: list[PublishedTrack] = []
     for item in publishes:
         if item.phase is not TrackPhase.LOST:
             out.append(item)
             continue
-        if item.pos_uncertainty < GUESS_TRIGGER_UNCERTAINTY_M:
+        if (
+            item.lost_s < GUESS_TRIGGER_LOST_S
+            and item.pos_uncertainty < GUESS_TRIGGER_UNCERTAINTY_M
+        ):
             out.append(item)
             continue
         guess = guess_field_xy(item)
@@ -91,6 +101,7 @@ def apply_guess_to_lost(publishes: tuple[PublishedTrack, ...]) -> tuple[Publishe
                 vx=item.vx,
                 vy=item.vy,
                 pos_uncertainty=item.pos_uncertainty,
+                lost_s=item.lost_s,
             )
         )
     return tuple(out)

@@ -23,7 +23,12 @@ from track.types import (
 
 MATCH_GATE_M: Final = 2.5
 CONFIRM_HITS: Final = 2
-COAST_FRAMES: Final = 5
+# 双寿命：COAST 内的 LOST 槽还能吸收观测（正常跟踪）；过了 COAST 进
+# 幽灵态——只外推发布（小地图/猜点窗口用），_pair_cost 一律 REJECT，
+# 不许偷观测。直接拉长吸收寿命会把基准从 9.6s 打到 5.6s（僵尸槽在
+# 0.5-0.8s 吸走路过的别人的车，位置/身份被污染），幽灵化没有这个代价。
+COAST_FRAMES: Final = 5   # 吸收寿命：0.5s@10Hz
+GHOST_FRAMES: Final = 12  # 发布寿命：1.2s@10Hz，猜点门（0.5s 起）的活窗
 DEAD_FRAMES: Final = 5  # 连续 5 帧（0.5s@10Hz）装甲全 dead 才判死；单帧误闪率 28% 不可信
 REBIND_FRAMES: Final = 3
 BIRTH_CONF: Final = 0.5
@@ -33,8 +38,12 @@ PATTERN_PENALTY: Final = 0.35
 TEAM_PENALTY: Final = 0.5
 # 哨兵盟友提示代价（规则 §3.2.3：雷达只能收哨兵的数据）
 ALLY_HINT_M: Final = 2.0     # 距哨兵报的盟友位置 <2m 视为「在盟友附近」
-ALLY_HINT_PENALTY: Final = 0.4  # 盟友附近的车想进敌方槽 → 加罚（更可能被误读）
-ALLY_HINT_BONUS: Final = 0.3   # 盟友附近的车想进盟友槽 → 减罚（可信度高）
+# 量级依据：哨兵 INS 是厘米级真值，灯条远距误读率仿真实测 71%——
+# 位置先验的可信度远高于灯色。加罚必须压得住敌方槽的
+# PATTERN_BONUS+距离小账（0.8 级），减罚要能在「敌我槽贴脸抢同一观测」
+# 时顶掉己方槽的 TEAM_PENALTY+CONFLICT（0.85 级）。
+ALLY_HINT_PENALTY: Final = 0.9  # 盟友附近的车想进敌方槽 → 加罚（更可能被误读）
+ALLY_HINT_BONUS: Final = 0.45   # 盟友附近的车想进己方槽 → 减罚（可信度高）
 # 身份时序聚合（港科大 type.py 同思路）：每槽记最近 30 帧的灯队/兵种票，
 # 取最近 10 帧指数加权（τ=0.5）出分布。小陀螺下单帧 dead/错标翻不动已确认槽。
 _HIST_LEN: Final = 30
@@ -65,6 +74,7 @@ class _Slot:
     bot_id: int | None = None
     hit_count: int = 0
     miss_count: int = 0
+    lost_s: float = 0.0  # 丢失后累计秒数；CONFIRMED 观测清零
     rebind_streak: int = 0
     dead_streak: int = 0
     seen: bool = False
@@ -76,19 +86,25 @@ class _Slot:
 
 
 class CascadeMatchTracker:
-    """10 个槽。不读裁判，不改定位，不做猜点跳变。"""
+    """10 个槽。不读裁判，不改定位，不做猜点跳变。
 
-    def __init__(self) -> None:
+    own_team：哨兵盟友提示的参照系。提示点报的是「己方机器人」，
+    判定敌我槽要用本方阵营比，不能信观测灯条色（灯条就是被修的对象）。
+    """
+
+    def __init__(self, *, own_team: Team | None = None) -> None:
         self._slots = [_Slot(slot) for slot in all_slots()]
+        self._own_team = own_team
         self._ally_hints: tuple[tuple[float, float], ...] = ()
 
     def set_ally_hints(self, positions: tuple[tuple[float, float], ...]) -> None:
         """哨兵回传的己方机器人位置提示（场地米制）。
 
         规则 §3.2.3：雷达只能接收哨兵的数据。哨兵把己方坐标发给雷达后，
-        匹配代价里用这些提示区分敌我——观测在盟友提示点附近却想进敌方
-        槽时加惩罚（盟友被灯条误读成敌方色），想进盟友槽时减代价。
-        协议未发布前留空，融合层到位后直接调用此接口。
+        匹配代价里用这些提示区分敌我——观测在盟友提示点附近时，更可能
+        是己方车：进己方槽减代价，进敌方槽加罚（盟友被灯条误读成
+        敌方色的场景）。协议未发布前留空，融合层到位后直接调用此接口；
+        需要 own_team 才生效，没有 own_team 的提示无从判定敌我。
         """
         self._ally_hints = positions
 
@@ -101,7 +117,7 @@ class CascadeMatchTracker:
             self._absorb(self._slots[slot_i], observations[obs_i], dt_s)
         for index, slot in enumerate(self._slots):
             if index not in matched:
-                self._mark_miss(slot)
+                self._mark_miss(slot, dt_s)
         return self._publish()
 
     def _predict(self, dt_s: float) -> None:
@@ -118,7 +134,7 @@ class CascadeMatchTracker:
         if not observations:
             return ()
         cost = [
-            [_pair_cost(slot, obs, self._ally_hints) for obs in observations]
+            [_pair_cost(slot, obs, self._ally_hints, self._own_team) for obs in observations]
             for slot in self._slots
         ]
         return min_cost_pairs(cost)
@@ -140,6 +156,7 @@ class CascadeMatchTracker:
                 slot.phase = TrackPhase.TENTATIVE
                 slot.hit_count = 1
                 slot.miss_count = 0
+                slot.lost_s = 0.0
                 slot.bot_id = obs.bot_id
                 slot.rebind_streak = 0
                 slot.filt.reset(obs.x, obs.y)
@@ -154,6 +171,7 @@ class CascadeMatchTracker:
             case TrackPhase.CONFIRMED | TrackPhase.LOST:
                 slot.phase = TrackPhase.CONFIRMED
                 slot.miss_count = 0
+                slot.lost_s = 0.0
                 _correct(slot, obs, dt_s)
                 _note_bot(slot, obs, status)
             case unreachable:
@@ -161,7 +179,7 @@ class CascadeMatchTracker:
         if slot.dead_streak >= DEAD_FRAMES:
             _deactivate(slot)  # 尸体停发：连着半秒装甲全熄，判死释放槽位
 
-    def _mark_miss(self, slot: _Slot) -> None:
+    def _mark_miss(self, slot: _Slot, dt_s: float) -> None:
         match slot.phase:
             case TrackPhase.INACTIVE:
                 return
@@ -172,10 +190,12 @@ class CascadeMatchTracker:
             case TrackPhase.CONFIRMED:
                 slot.phase = TrackPhase.LOST
                 slot.miss_count = 1
+                slot.lost_s = dt_s
             case TrackPhase.LOST:
                 slot.miss_count += 1
-                if slot.miss_count >= COAST_FRAMES:
-                    _deactivate(slot)
+                slot.lost_s += dt_s
+                if slot.miss_count >= GHOST_FRAMES:
+                    _deactivate(slot)  # 幽灵期满：彻底注销
             case unreachable:
                 assert_never(unreachable)
 
@@ -194,6 +214,7 @@ class CascadeMatchTracker:
                         vx=slot.filt.vx,
                         vy=slot.filt.vy,
                         pos_uncertainty=slot.filt.pos_uncertainty,
+                        lost_s=slot.lost_s,
                     )
                 )
         return tuple(published)
@@ -216,7 +237,12 @@ def pattern_status(slot: _Slot, obs: FieldObservation) -> PatternStatus:
     return PatternStatus.CONFLICT
 
 
-def _pair_cost(slot: _Slot, obs: FieldObservation, ally_hints: tuple[tuple[float, float], ...]) -> float:
+def _pair_cost(
+    slot: _Slot,
+    obs: FieldObservation,
+    ally_hints: tuple[tuple[float, float], ...],
+    own_team: Team | None,
+) -> float:
     status = pattern_status(slot, obs)
     match slot.phase:
         case TrackPhase.INACTIVE:
@@ -226,7 +252,13 @@ def _pair_cost(slot: _Slot, obs: FieldObservation, ally_hints: tuple[tuple[float
                 return REJECT
             return 1.0 - obs.pattern_conf
         case TrackPhase.TENTATIVE | TrackPhase.CONFIRMED | TrackPhase.LOST:
-            return _active_cost(slot, obs, status, ally_hints)
+            if slot.phase is TrackPhase.LOST and slot.miss_count >= COAST_FRAMES:
+                # 幽灵：只收身份完全吻合的观测（本尊回归，灯条+图案都对上）。
+                # 别的车（异色/异兵种/无身份）一律 REJECT——直接拉长吸收
+                # 寿命的版本里僵尸槽偷走过路车，基准 9.6s → 5.6s。
+                if obs.team is not slot.slot.team or obs.role is not slot.slot.role:
+                    return REJECT
+            return _active_cost(slot, obs, status, ally_hints, own_team)
         case unreachable:
             assert_never(unreachable)
 
@@ -236,6 +268,7 @@ def _active_cost(
     obs: FieldObservation,
     status: PatternStatus,
     ally_hints: tuple[tuple[float, float], ...],
+    own_team: Team | None,
 ) -> float:
     dist = ((slot.filt.x - obs.x) ** 2 + (slot.filt.y - obs.y) ** 2) ** 0.5
     if dist > MATCH_GATE_M:
@@ -254,14 +287,18 @@ def _active_cost(
             assert_never(unreachable)
     if obs.team is not None and obs.team is not slot.slot.team:
         cost += TEAM_PENALTY
-    # 哨兵盟友提示：观测在已知盟友位置附近时，敌我归属的可信度更高
-    if ally_hints and obs.team is not None:
+    # 哨兵盟友提示：观测在己方提示点附近 → 真身大概率是己方车。
+    # 判定基准是 slot.team vs own_team（提示的阵营语义），不是 obs.team——
+    # 灯条色正是这个提示要修的误读源，不能反过来当判据：
+    #   盟友附近 + 己方槽 → 位置说这是自家车 → 减罚
+    #   盟友附近 + 敌方槽 → 自家车被误读成敌色想进敌方槽 → 加罚
+    if ally_hints and own_team is not None:
         near_ally = any(math.hypot(obs.x - hx, obs.y - hy) < ALLY_HINT_M for hx, hy in ally_hints)
         if near_ally:
-            if obs.team is slot.slot.team:
-                cost -= ALLY_HINT_BONUS  # 盟友附近 + 同阵营 → 可信匹配
+            if slot.slot.team is own_team:
+                cost -= ALLY_HINT_BONUS
             else:
-                cost += ALLY_HINT_PENALTY  # 盟友附近 + 异阵营 → 可能被误读
+                cost += ALLY_HINT_PENALTY
     return cost
 
 
@@ -288,15 +325,13 @@ def _visible(slot: _Slot) -> bool:
     历史票是证据：近窗顶票 ≥0.7 都在说「我是别的兵种」就静默。
     """
     match slot.phase:
-        case TrackPhase.CONFIRMED:
-            pass
-        case TrackPhase.LOST:
-            if slot.miss_count >= COAST_FRAMES:
-                return False
-        case TrackPhase.TENTATIVE:
-            pass
         case TrackPhase.INACTIVE:
             return False
+        case TrackPhase.LOST:
+            if slot.miss_count >= GHOST_FRAMES:
+                return False  # 幽灵期满在 _mark_miss 注销，这里兜底
+        case TrackPhase.CONFIRMED | TrackPhase.TENTATIVE:
+            pass
         case unreachable:
             assert_never(unreachable)
     if not _on_field_publish(slot.filt.x, slot.filt.y):
@@ -349,6 +384,7 @@ def _deactivate(slot: _Slot) -> None:
     slot.bot_id = None
     slot.hit_count = 0
     slot.miss_count = 0
+    slot.lost_s = 0.0
     slot.rebind_streak = 0
     slot.dead_streak = 0
     slot.seen = False

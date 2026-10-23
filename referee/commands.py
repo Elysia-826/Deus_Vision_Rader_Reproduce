@@ -150,7 +150,7 @@ def marks_from_publishes(
 ) -> tuple[MapMark | None, ...]:
     """跟踪发布 → 12 个 0x0305 槽。质量门：默认只发 CONFIRMED。
 
-    include_lost=True 时 LOST（卡尔曼外推中）也发——只在基准证明外推误差
+    include_lost=True 时 LOST（卡尔曼外推）也发——只在基准证明外推误差
     中位数 < 0.8m 准确线时才考虑打开；错发比不发扣得更快（x 连击清零）。
     TENTATIVE 一律不发：两帧确认前的身份不可信。
 
@@ -170,6 +170,37 @@ def marks_from_publishes(
             continue  # LOST 但不在优先集合 → 不发
         marks[slot] = mark_from_field(publish.x, publish.y)
     return tuple(marks)
+
+
+STALE_MARK_LOST_S: Final = 0.5
+"""生外推标记的年龄上限（秒）= 裁判中断线。
+
+P 经济学：错发一发 −0.8 且清连击（5Hz 下 −4/s），静默只吃中断
+（−0.8/0.5s = −1.6/s）。0.5s 后的外推大概率 d>1.6m → 生外推
+从这时刻起是负资产。实测 COAST 8 帧 @10Hz 全发会把基准从
+9.6s 打到 5.6s。年龄 ≥0.5s 的 LOST 只有两种坐标值得发：
+猜点换过的（GUESS_LOST 已改写 x/y）和离线槽的（怎么发都判准）。
+"""
+
+
+def drop_stale_lost(
+    own_team: Team,
+    publishes: tuple[PublishedTrack, ...],
+    priority_slots: frozenset[int],
+) -> tuple[PublishedTrack, ...]:
+    """从标记路径里剔除 ≥0.5s 的生外推 LOST（小地图发布不受影响）。
+
+    猜点开启时由调用方先跑 apply_guess_to_lost 换坐标再调本函数——
+    换过战略点的 LOST 不算「生外推」，照发。离线优先槽照发（免费 P）。
+    """
+    out: list[PublishedTrack] = []
+    for item in publishes:
+        if item.phase is TrackPhase.LOST and item.lost_s >= STALE_MARK_LOST_S:
+            slot = slot_index_of(own_team, item.team, item.label)
+            if slot is not None and slot not in priority_slots:
+                continue
+        out.append(item)
+    return tuple(out)
 
 
 def _check_password(password: str) -> bytes:

@@ -38,9 +38,15 @@ from locate.homography import HomographyMap, homography_from_path  # noqa: E402
 from locate.minimap import minimap_from_path  # noqa: E402
 
 from locate.types import FieldXY  # noqa: E402
-from referee.commands import MarkProgress, RadarInfo, marks_from_publishes  # noqa: E402
+from referee.commands import (
+    MarkProgress,
+    RadarInfo,
+    drop_stale_lost,
+    marks_from_publishes,
+    slot_index_of,
+)  # noqa: E402
 from referee.link import RefereeLink  # noqa: E402
-from referee.policy import should_trigger_double  # noqa: E402
+from referee.policy import SendQualityTracker, detect_offline_targets, should_trigger_double  # noqa: E402
 from referee.stub import StubReferee  # noqa: E402
 from referee.transport import LoopbackPair  # noqa: E402
 from track.cascade import CascadeMatchTracker  # noqa: E402
@@ -91,6 +97,9 @@ HIK_URL = os.environ.get("RADAR_HIK_URL", "0")  # 默认 USB 第 0 路
 PHASE_SCALE = float(os.environ.get("RADAR_PHASE_SCALE", "0.05"))
 # RADAR_SENTRY_GUIDE=1：通过 0x0301 机器人间通信把敌方位置发给己方哨兵。
 SENTRY_GUIDE = os.environ.get("RADAR_SENTRY_GUIDE", "0") == "1"
+# 真机相机名（Camera_Radar_Blue / Camera_Radar_Red）：决定用哪套外参和
+# 己方颜色先验。红方上场必须设，否则默认蓝方会把先验套反。
+CAMERA_NAME_ENV = os.getenv("RADAR_CAMERA_NAME", "")
 # =========================
 
 ImageU8 = NDArray[uint8]
@@ -327,10 +336,14 @@ def main() -> None:
     detector = load_detector(PatternStage(net=net, transform=transform, device=str(device)))
     warmup(detector, zeros((3000, 4096, 3), dtype=uint8))
     last_frame = -1
-    camera_name = "Camera_Radar_Blue"
+    camera_name = CAMERA_NAME_ENV or "Camera_Radar_Blue"
     img_idx = 0
     trails: dict[str, list[tuple[int, int]]] = {}
     tracker = CascadeMatchTracker()
+    # 离线目标检测（§5.1.5.4）：每帧记录各敌方槽的发布质量，
+    # 0x020C 到达时反推哪些敌方车的定位模块可能离线。
+    send_quality = SendQualityTracker()
+    priority_slots: frozenset[int] = frozenset()
     last_tick: float | None = None
     t_sim = 0.0
     referee_link: RefereeLink | None = None
@@ -439,7 +452,26 @@ def main() -> None:
                 referee_stub.set_phase_scale(PHASE_SCALE)
                 print("run_radar referee own_team", referee_own.value, "phase_scale", PHASE_SCALE, flush=True)
             referee_stub.set_truth(truth)
-            _marks = marks_from_publishes(referee_own, publishes, include_lost=SEND_LOST)
+            # 标记源：GUESS 关时 ≥0.5s 的生外推是负资产（错发 −0.8 清
+            # 连击 vs 静默中断 −1.6/s），剔出标记路径；小地图不受影响。
+            # GUESS 开时 apply_guess_to_lost 已把陈旧坐标换成战略点，
+            # 再过滤会误杀，跳过。
+            if GUESS_LOST:
+                mark_source = publishes
+            else:
+                mark_source = drop_stale_lost(referee_own, publishes, priority_slots)
+            # 质量画像：记标记源而不是全量发布——没进标记路径的帧没上线。
+            # SEND_LOST=0 的非陈旧 LOST 在源里但被质量门拦：照记，
+            # 离线检测判的就是「这种流还亮着易伤位」。
+            for publish in mark_source:
+                if publish.phase is TrackPhase.TENTATIVE:
+                    continue
+                enemy_slot = slot_index_of(referee_own, publish.team, publish.label)
+                if enemy_slot is not None and enemy_slot < 6:
+                    send_quality.feed(enemy_slot, publish.phase is TrackPhase.CONFIRMED)
+            _marks = marks_from_publishes(
+                referee_own, mark_source, include_lost=SEND_LOST, priority_slots=priority_slots
+            )
             referee_link.send_map(_marks, now_s=t_sim)
             if SENTRY_GUIDE:
                 referee_link.send_sentry_guidance(_marks)
@@ -451,6 +483,14 @@ def main() -> None:
                     radar_info_state = event.radar_info
                 if event.mark_progress is not None:
                     mark_state = event.mark_progress
+            if mark_state is not None:
+                # §5.1.5.4：易伤位亮 + CONFIRMED 发送占比撑不起 P≥100
+                # → 判模块离线，优先槽放行 LOST 标记白捡 P。误判自纠：
+                # 外推标记吃 ERROR → P 跌破 100 → 位灭 → 自动除名。
+                detected = detect_offline_targets(mark_state, send_quality)
+                if detected - priority_slots:
+                    print(f"[{last_frame}] offline-module priority slots {sorted(detected)}", flush=True)
+                priority_slots = detected
             if radar_info_state is not None and mark_state is not None:
                 if should_trigger_double(radar_info_state, mark_state):
                     referee_link.trigger_double()

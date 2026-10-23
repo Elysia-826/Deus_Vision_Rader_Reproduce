@@ -114,23 +114,67 @@ def _on_field(hit: FieldXY) -> bool:
 
 
 def _appearance(robot: LinkedRobot) -> tuple[Team | None, Role | None, float]:
-    best_conf = -1.0
-    team: Team | None = None
-    role: Role | None = None
-    lamp_team: Team | None = None
+    """多装甲多数投票。max_det=3 后一辆车最多带三块装甲读数。
+
+    同一辆车的三块板应当显示同一兵种/同色灯条；单板误读（如两块说 3、
+    一块 0.65 说 1）被多数票压掉。逐板投票而不是取最高置信——
+    「置信度最高的那块」恰好就是误读时没有任何机制能纠正它。
+
+    灯条颜色：dead 不投票。多数胜；平票回退首块（保持旧行为）。
+    兵种：同名多数胜；平票取平票组里置信度最高的名字。
+    兵种置信度：获胜名字各板里的最高 conf（分类器对该名字的最佳读数）。
+    """
+    lamp_counts: dict[Team, int] = {}
+    pattern_counts: dict[str, int] = {}
+    pattern_best_conf: dict[str, float] = {}
+    pattern_color: dict[str, Team | None] = {}
+    first_lamp: Team | None = None
     for armor in robot.armors:
         color = _TEAM_BY_LABEL.get(armor.label)
-        if color is not None and lamp_team is None:
-            lamp_team = color
+        if color is not None:
+            lamp_counts[color] = lamp_counts.get(color, 0) + 1
+            if first_lamp is None:
+                first_lamp = color
         if armor.pattern is None:
             continue
-        if armor.pattern.conf <= best_conf:
-            continue
-        best_conf = armor.pattern.conf
-        team = color
-        role = _ROLE_BY_NAME.get(armor.pattern.name)
-    if team is None:
-        team = lamp_team
-    if best_conf < 0.0:
-        return team, None, 0.0
-    return team, role, best_conf
+        name = armor.pattern.name
+        pattern_counts[name] = pattern_counts.get(name, 0) + 1
+        if armor.pattern.conf > pattern_best_conf.get(name, -1.0):
+            pattern_best_conf[name] = armor.pattern.conf
+            pattern_color[name] = color  # 跟着该名字的最高置信板走
+    lamp_team = _majority_team(lamp_counts, first_lamp)
+    if not pattern_counts:
+        return lamp_team, None, 0.0
+    best_name = _majority_name(pattern_counts, _top_conf_name(pattern_best_conf))
+    if best_name is None:
+        return lamp_team, None, 0.0
+    conf = pattern_best_conf[best_name]
+    # 队伍归属：灯色多数票优先（多数票就是为压单板误读而生）；
+    # 全 dead 没有灯色票时才退回获胜图案板的颜色。
+    team = lamp_team or pattern_color.get(best_name)
+    role = _ROLE_BY_NAME.get(best_name)
+    return team, role, conf
+
+
+def _majority_team(counts: dict[Team, int], fallback: Team | None) -> Team | None:
+    """灯色众数；空/平票回退 fallback（首块），保持旧行为的确定性。"""
+    if not counts:
+        return fallback
+    top = max(counts.values())
+    winners = [key for key, count in counts.items() if count == top]
+    return winners[0] if len(winners) == 1 else fallback
+
+
+def _majority_name(counts: dict[str, int], fallback: str | None) -> str | None:
+    """兵种名众数；平票回退最高置信名（旧 max-conf 行为的等价物）。"""
+    if not counts:
+        return fallback
+    top = max(counts.values())
+    winners = [key for key, count in counts.items() if count == top]
+    return winners[0] if len(winners) == 1 else fallback
+
+
+def _top_conf_name(best_conf: dict[str, float]) -> str | None:
+    if not best_conf:
+        return None
+    return max(best_conf, key=lambda name: best_conf[name])
