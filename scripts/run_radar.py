@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import sys
 import time
 from enum import StrEnum
@@ -56,6 +57,7 @@ from track.log import append_frame  # noqa: E402
 from track.observe import observations_from_result  # noqa: E402
 from track.truth import parse_sim_robots  # noqa: E402
 from track.types import PublishedTrack, SimRobot, Team, TrackPhase  # noqa: E402
+from visualize_official import OfficialRecorder, build_official_frame, warn_once_if_no_cjk  # noqa: E402
 
 # ========== 开关 ==========
 # RADAR_SOURCE / RADAR_IMAGES_DIR 环境变量可覆盖（打分跑批用，不用改代码）。
@@ -100,6 +102,16 @@ SENTRY_GUIDE = os.environ.get("RADAR_SENTRY_GUIDE", "0") == "1"
 # 真机相机名（Camera_Radar_Blue / Camera_Radar_Red）：决定用哪套外参和
 # 己方颜色先验。红方上场必须设，否则默认蓝方会把先验套反。
 CAMERA_NAME_ENV = os.getenv("RADAR_CAMERA_NAME", "")
+# 考核/官方屏录像：RADAR_RECORD=1 把每帧 1920×1080 合成（相机画面 +
+# 自划区域图 + 字幕/数据表）写进 RADAR_RECORD_PATH。基座 HDMI 屏和
+# 录像看的是同一份像素（规则 4.2.5 只有 1080p 一根线）。
+RECORD = os.environ.get("RADAR_RECORD", "0") == "1"
+RECORD_PATH = Path(
+    os.environ.get("RADAR_RECORD_PATH", str(_ROOT / "scene" / "locate_out" / "official_record.mp4"))
+)
+RECORD_FPS = float(os.environ.get("RADAR_RECORD_FPS", "10"))  # 仿真 10Hz；真机相机源设 25/30
+# RADAR_FULLSCREEN=1：imshow 窗口全屏（上场机接基座 HDMI 屏用）。
+FULLSCREEN = os.environ.get("RADAR_FULLSCREEN", "0") == "1"
 # =========================
 
 ImageU8 = NDArray[uint8]
@@ -245,7 +257,11 @@ def overlay(
     publishes: tuple[PublishedTrack, ...],
     trails: dict[str, list[tuple[int, int]]],
     fps: float,
-) -> ImageU8:
+    *,
+    embed_minimap: bool = True,
+) -> tuple[ImageU8, ImageU8]:
+    """画相机层 + 区域图。返回 (canvas, board)——board 单独交回给
+    1080p 合成面板用（embed_minimap=False 时不把小地图压进相机画面）。"""
     canvas = vis2.draw_result(frame, result, fps)
     board = minimap.copy()
     if SHOW_GT:
@@ -277,7 +293,9 @@ def overlay(
     for tag in list(trails):
         if tag not in seen:
             trails.pop(tag, None)
-    return inset_minimap(canvas, board)
+    if embed_minimap:
+        canvas = inset_minimap(canvas, board)
+    return canvas, board
 
 
 def main() -> None:
@@ -287,6 +305,26 @@ def main() -> None:
             pass
         case unreachable:
             raise SourceNotReadyError(source=str(unreachable))
+
+    # 上场机约束（S60/S99）：开发机 Windows 没问题，但真机源 + Windows
+    # 这套组合过不了检录——开跑前就喊，不等人到检录席才发现。
+    # 无线禁用是系统设置（S99），不在程序里检测。
+    if source is FrameSource.HIK and platform.system() == "Windows":
+        print(
+            "\n==================== 上场机约束警告 ====================\n"
+            "S60：运算平台必须是 Linux——当前在 Windows 上跑真机源（RADAR_SOURCE=hik）。\n"
+            "S99：运算端必须禁用无线（系统设置里关，本程序不检测）。\n"
+            "开发调试可以继续跑，但这套配置过不了检录。上场机换 Linux 启动。\n"
+            "========================================================\n",
+            flush=True,
+        )
+    if source is FrameSource.HIK:
+        warn_once_if_no_cjk()  # 考核字幕要中文，缺字体现在说，别录完才发现
+        if RECORD:
+            print(
+                f"run_radar record -> {RECORD_PATH.name} @ {RECORD_FPS:.0f}fps 1920x1080",
+                flush=True,
+            )
 
     _preflight_gpu()
 
@@ -356,6 +394,15 @@ def main() -> None:
     if source is FrameSource.BLENDER or source is FrameSource.IMAGES:
         IDENTITY_LOG.parent.mkdir(parents=True, exist_ok=True)
         IDENTITY_LOG.write_text("", encoding="utf-8")
+    recorder: OfficialRecorder | None = None
+    if RECORD:
+        recorder = OfficialRecorder(RECORD_PATH, RECORD_FPS)
+    if not HEADLESS:
+        # 基座那块 1920×1080（4.2.5）：窗口名固定 radar，全屏由
+        # RADAR_FULLSCREEN=1 切换——上场机直接把合成画面铺满屏。
+        cv2.namedWindow("radar", cv2.WINDOW_NORMAL)
+        if FULLSCREEN:
+            cv2.setWindowProperty("radar", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     print("run_radar waiting for frames…", flush=True)
     while True:
         truth: tuple[SimRobot, ...] = ()
@@ -498,16 +545,32 @@ def main() -> None:
             referee_stub.log_frame(REFEREE_LOG, last_frame, now_s=t_sim)
         if source is FrameSource.BLENDER or source is FrameSource.IMAGES:
             append_frame(IDENTITY_LOG, last_frame, truth, publishes)
-        vis = overlay(frame, result, calib, minimap, truth, publishes, trails, fps)
         print(f"[{last_frame}] cars {len(result.robots)} slots {len(publishes)}", flush=True)
+        # 1080p 合成只在要看或要录时才算——headless 基准不多付这笔。
+        if HEADLESS and not RECORD:
+            continue
+        vis, board = overlay(
+            frame, result, calib, minimap, truth, publishes, trails, fps,
+            embed_minimap=False,
+        )
+        official = build_official_frame(
+            vis, board, publishes, truth,
+            frame_no=last_frame,
+            fps=fps,
+            own_team=Team.BLUE if "Blue" in camera_name else Team.RED,
+        )
+        if recorder is not None:
+            recorder.write(official)
         if HEADLESS:
             continue
-        cv2.imshow("radar", vis2._scale(vis))
+        cv2.imshow("radar", official)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     if cap is not None:
         cap.release()
+    if recorder is not None:
+        recorder.release()
     if referee_stub is not None:
         summary = referee_stub.summary()
         print(
