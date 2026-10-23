@@ -419,6 +419,9 @@ python scripts/score_identity_log.py [identity_log.jsonl]
 
 GT 先用蓝相机投影过滤"画面内可见"，再与发布点最近邻配对（门限 2.5 m）。输出：可见 GT 数、发布数（tentative/confirmed 分开）、配对率、误差分布、野点数。
 
+> **最近邻不能当发布门的成功线**：槽名错了但位置贴近某台车时，最近邻会把
+> 错身份算成命中。审发布门用 §10.7 的 `score_false_reports.py`（按身份判）。
+
 ### 10.3 分级漏斗 —— `score_stage_funnel.py`
 
 ```bash
@@ -450,6 +453,67 @@ python scripts/diagnose.py --seq <目录> --mode conf   # 换序列（默认 vid
 | `debug_minimap_grid.py` | 小地图网格对齐调试 |
 | `visualize_two_stage.py` / `visualize_minimap.py` | 单帧可视化与绘制入口（权重加载在 `detect/runtime.py`） |
 | `infer_yolo_trt.py` | TensorRT 推理最小冒烟（默认指向 `weights/armor_best.engine` + `scripts/RM_TestVideo.mp4`，可在文件头改） |
+
+### 10.7 虚报审计 —— `score_false_reports.py`（发布门口径）
+
+```bash
+python scripts/score_false_reports.py [identity_log.jsonl ...]   # 多个日志逐个单独报数
+```
+
+**口径**（必须按身份，不能用最近邻）：
+
+- **虚报**：pred 的槽名（R3/B1/BS…）必须对上**同队同兵种**的真值，且这台车在
+  **2.5 m 内**。对不上、或 2.5 m 内没有这台车——哪怕位置贴着另一台车——记 1 次虚报。
+- **漏报**：蓝相机可见的真值（与 §10.2 同一投影过滤）里，该帧没有任何同名槽发布，记 1 次。
+- 每套序列单独报数，不混总分。
+
+**基线**（2026-10-24，`main` @ 5289489，未动任何门；序列：`scene/locate_out/{videoseq, videoseq_dwell, videoseq_2027_dwell}`，各 200 帧 @10 Hz）：
+
+| 序列 | 发布数（conf/lost/tent） | 虚报 | 漏报 | 误差中位 | 误差最差 |
+|---|---|---|---|---|---|
+| videoseq | 570（252/222/96） | 370 | 642 | 1.084 m | 2.484 m |
+| videoseq_dwell | 640（246/221/173） | 330 | 599 | 1.160 m | 2.480 m |
+| videoseq_2027_dwell | 799（542/204/53） | 386 | 442 | 0.166 m | 2.485 m |
+
+**收门 A/B**（基线虚报 > 0，允许收门；一次只改一个数，同批序列重跑对比）：
+
+| 档（相对基线单值改动） | 虚报 v/d/2027 | 漏报 v/d/2027 | 判定 |
+|---|---|---|---|
+| BIRTH_CONF 0.5→0.7 | 379/335/349 | 629/632/522 | 几乎无效，弃 |
+| BIRTH_CONF 0.5→0.9 | 326/295/197 | 642/595/**630** | 2027 漏报 630 > 上限 530，弃 |
+| FRACTION 0.7→0.6 | 354/320/348 | 661/617/522 | **采用** |
+| FRACTION 0.7→0.5 | 313/289/320 | 713/660/**570** | 2027 漏报 570 > 上限 530，弃 |
+| MIN_VOTES 3→2 | =基线 | =基线 | 数学上无效（出生票必同意），弃 |
+
+**采用档**：`track/cascade.py::_PUBLISH_GATE_FRACTION` 0.7 → 0.6，其余不动。
+
+| 序列 | 虚报（基线→采用） | 漏报（基线→采用） | 漏报 +20% 上限 |
+|---|---|---|---|
+| videoseq | 370 → **354** | 642 → 661 | 770 ✓ |
+| videoseq_dwell | 330 → **320** | 599 → 617 | 718 ✓ |
+| videoseq_2027_dwell | 386 → **348** | 442 → 522 | 530 ✓（已贴近） |
+
+**上限声明**：固定回放上虚报**做不到 0**，本轮停在 0.6 这一档。结构原因（审计
+证据见 `score_false_reports.py` 按槽/按状态分解）：
+
+1. **角色票看不见队伍错认**：R1 槽吃蓝英雄的观测时，图案「1」读得完全正确
+   ——角色票同意、队伍错了，`_identity_publishable` 只看 role 不看 team，
+   队伍错认（含 LOST 外推继承的错认）从这道门漏过去。
+2. **LOST 外推漂移**：正确身份的槽丢车后外推 1.2 s，车一转弯坐标就漂出
+   2.5 m——发布的是「对的槽名、错的位置」，按口径记虚报。
+3. **错读出生本身高置信**：BIRTH_CONF 0.9 能把虚报压到 197–326，但 2027
+   的正确读数置信度低，出生门一刀切把自己人也切了（漏报 630），不可用。
+
+漏报上升上限**写死**：2027 序列漏报 ≤ 530（基线 442 + 20%）；0.6 档实测 522，
+只剩 8 帧余量——任何更强的收门都会先爆漏报。
+
+复现（确定性流水线，两次运行日志 MD5 一致）：
+
+```bash
+RADAR_SOURCE=images RADAR_HEADLESS=1 RADAR_IMAGES_DIR=scene/locate_out/videoseq_dwell \
+RADAR_IDENTITY_LOG=<临时文件> python scripts/run_radar.py
+python scripts/score_false_reports.py <临时文件>
+```
 
 ---
 
@@ -569,6 +633,7 @@ python scripts/calibrate_minimap.py                            # 俯视图四角
 # ── 打分 / 诊断 ──────────────────────────────────────
 python scripts/eval_foot_ray.py --weights best.pt               # 车模型验收门禁
 python scripts/score_identity_log.py                           # 身份召回
+python scripts/score_false_reports.py                          # 虚报审计（发布门，按身份，§10.7）
 python scripts/score_stage_funnel.py                            # 分级漏斗
 python scripts/diagnose.py --mode conf                         # 诊断（conf/lamp/confusion/digits）
 

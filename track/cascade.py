@@ -339,8 +339,16 @@ def _visible(slot: _Slot) -> bool:
     return _identity_publishable(slot)
 
 
-_PUBLISH_GATE_FRACTION: Final = 0.7  # 近窗顶票占比 ≥0.7 在说别的兵种 → 静默
+_PUBLISH_GATE_FRACTION: Final = 0.6  # 近窗顶票占比 ≥0.6 在说别的兵种 → 静默
+# 0.7→0.6（2026-10-24 固定回放 A/B，三套序列数据见 docs/radar_operation.md §10.7）：
+# 三序列虚报合计 1086→1022，漏报 +117 仍在各序列 +20% 预算内（2027 漏报
+# 442→522，上限 530）。继续压（0.5）2027 漏报到 570 超预算，不采用。
+# 角色票看不见队伍错认（R1 槽吃蓝英雄时图案「1」读得完全正确），所以靠这个
+# 门虚报到不了 0——上限与结构原因记录在 §10.7。
 _PUBLISH_GATE_MIN_VOTES: Final = 3  # 至少 3 票才够格说「认同/不认同」
+# 注意：MIN_VOTES=2 数学上不可达——出生观测必须 AGREE（第一票永远同意本槽
+# 身份），2 票时异见票最大占比 1.0/1.61=0.62 < 任何可用 FRACTION，A/B 实测
+# 与基线逐帧一致；最早否决只能出现在第 3 票。
 
 
 def _identity_publishable(slot: _Slot) -> bool:
