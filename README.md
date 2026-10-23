@@ -2,7 +2,17 @@
 
 港科大 [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm) 起步的单目雷达，现已面向 RM2027 独立演进。骨干 YOLO26，图案 MobileNetV3-Small @ 64。场景已切换到 RMUC2027。
 
-操作手册见 [docs/radar_operation.md](docs/radar_operation.md)，2027 迁移计划见 [docs/migration_2027.md](docs/migration_2027.md)。
+## 文档导航
+
+| 想做什么 | 看哪份 |
+|---|---|
+| 跑起来 / 标定 / 打分 / 排错 | [操作手册](docs/radar_operation.md) |
+| 改代码前理解各模块设计 | [架构深讲](docs/architecture.md) |
+| 新人接手 / 赛日现场检查 | [接手与赛日清单](docs/handover_checklist.md) |
+| 训练 / 收割数据 / 导出换入 | [训练与导出指南](docs/training_guide.md) |
+| RM2027 场地与规则迁移 | [迁移计划](docs/migration_2027.md) |
+| 裁判串口协议细节 | [协议笔记](docs/referee_protocol_notes.md) |
+| Linux GPU 容器 | [Docker 指南](docker/README.md) |
 
 ## 当前能跑
 
@@ -24,12 +34,13 @@ track/             槽位级联跟踪 + 战略猜点 + 身份发布门
 scripts/           运行、标定、打分、诊断（diagnose.py）
 tools/             pt → onnx / TensorRT
 tests/             pytest
-docs/              操作手册、协议笔记、2027 迁移计划
+docs/              操作手册、架构深讲、接手清单、训练指南、协议笔记、2027 迁移计划
 docker/            Linux GPU 容器（Dockerfile + compose）
 dataset/           收割 + 划分脚本（图像不进 git）
 weights/           本地权重（不进 git）
 scene/             RMUC2027 Blender 仿真（CAD/贴图不进 git）
 refs/              官方协议/规则手册本地留档（不进 git）
+zaowu_audit/       场地建模审计工作区（在用，不进 git）
 ```
 
 ## 和参考方案的差异
@@ -57,9 +68,10 @@ python scripts/run_radar.py                                        # Blender 仿
 RADAR_SOURCE=images RADAR_HEADLESS=1 python scripts/run_radar.py  # 回放
 RADAR_SOURCE=hik RADAR_HIK_URL=0 python scripts/run_radar.py      # USB 相机
 RADAR_SOURCE=hik RADAR_HIK_URL=rtsp://... python scripts/run_radar.py  # RTSP
+scripts\watch_radar.cmd                                            # 真机守护：崩溃自动重启（先设好环境变量再启动）
 
 # 标定
-python scripts/calibrate_pnp.py frame.jpg --intrinsics <K.json>  # 真机 PnP（推荐）
+python scripts/calibrate_pnp.py frame.jpg --intrinsics <K.json>  # 真机 PnP（推荐，点击后有 WASD 放大镜微调）
 python scripts/validate_pnp.py                                    # 仿真精度验证
 python scripts/calibrate_landmarks.py                             # 单应（备选）
 
@@ -101,15 +113,24 @@ python scripts/score_referee.py
 |---|---|---|
 | `RADAR_SOURCE` | `blender` | 图源：blender / video / images / hik |
 | `RADAR_HEADLESS` | `0` | 1 = 不弹窗口 |
-| `RADAR_IMAGES_DIR` | `scene/locate_out/videoseq_dwell` | images 源目录 |
+| `RADAR_IMAGES_DIR` | `scene/locate_out/videoseq` | images 源目录（跑基准用 `videoseq_dwell`） |
 | `RADAR_HIK_URL` | `0` | USB 设备号或 RTSP 地址 |
 | `RADAR_REFEREE_STUB` | `0` | 1 = 启用 stub 裁判 |
+| `RADAR_REFEREE_LOG` | `scene/locate_out/referee_log.jsonl` | stub 裁判日志路径 |
 | `RADAR_SEND_LOST` | `0` | 1 = LOST 槽也发标记 |
 | `RADAR_GUESS` | `0` | 1 = LOST ≥0.5s 换战略猜点（时长门 + σ 副门） |
-| `RADAR_CAMERA_NAME` | `Camera_Radar_Blue` | 真机相机名（红方上场必须设 Red，决定外参 + 颜色先验） |
 | `RADAR_PHASE_SCALE` | `0.05` | 比赛阶段时间压缩比 |
 | `RADAR_SENTRY_GUIDE` | `0` | 1 = 0x0301 哨兵引导 |
+| `RADAR_CAMERA_NAME` | `Camera_Radar_Blue` | 真机相机名（红方上场必须设 Red，决定外参 + 颜色先验） |
+| `RADAR_RECORD` | `0` | 1 = 录 1920×1080 官方合成（相机画面 + 自划区域图 + 字幕/数据表），基座 HDMI 屏与录像同像素 |
+| `RADAR_RECORD_PATH` | `scene/locate_out/official_record.mp4` | 录像输出路径 |
+| `RADAR_RECORD_FPS` | `10` | 录像帧率（仿真 10Hz；真机相机源设 25/30） |
+| `RADAR_FULLSCREEN` | `0` | 1 = 显示窗口全屏（上场机接基座 HDMI 屏） |
+| `RADAR_FONT_PATH` | 自动探测 | 考核字幕中文字体路径；找不到时退 ASCII 并打警告 |
 | `RADAR_IDENTITY_LOG` | `.../identity_log.jsonl` | identity 日志路径 |
+| `RADAR_AUTO_ENGINE` | `1` | 0 = 关闭"engine 缺失自动编译"（pt→engine 子进程重编，失败回退 pt） |
+
+> 完整口径与用法见[操作手册 §12](docs/radar_operation.md)；`LOCATE_MODE` 等代码内开关不在环境变量里。
 
 ## 基准历史
 

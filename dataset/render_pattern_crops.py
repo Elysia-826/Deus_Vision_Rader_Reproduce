@@ -25,9 +25,9 @@ from numpy import uint8, zeros
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
-sys.path.insert(0, str(_ROOT / "scripts"))
 
-import visualize_two_stage as vis2  # noqa: E402
+from detect import PatternStage  # noqa: E402
+from detect.runtime import load_classifier, load_detector  # noqa: E402
 from locate.camera import camera_from_path  # noqa: E402
 from locate.ray_mesh import FieldMesh  # noqa: E402
 from track.observe import foot_pixel  # noqa: E402
@@ -59,8 +59,8 @@ def main() -> None:
 
     pose = camera_from_path(args.pose)
     mesh = FieldMesh.from_npz(args.mesh)
-    net, transform, device = vis2._load_classifier()
-    detector = vis2._load_detector(vis2.PatternStage(net=net, transform=transform, device=str(device)))
+    net, transform, device = load_classifier()
+    detector = load_detector(PatternStage(net=net, transform=transform, device=str(device)))
     detector.infer(zeros((3000, 4096, 3), dtype=uint8), persist_tracks=False)  # 预热
 
     files = sorted(args.seq.glob("*.jpg"))

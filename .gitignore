@@ -218,8 +218,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 # -----------------------------------------------------------------------------
-# Deus Vision Radar reproduce
-# Detection-only reproduce of HKUST RM2025 radar (YOLO26 + two-stage).
+# Deus Vision Radar
+# RM2027 monocular radar stack (detect / locate / track / referee stub), YOLO26 backbone.
+# Originated from a HKUST RM2025 reproduce; evolved independently for RM2027.
 # Keep source in git. Keep weights, datasets, videos, and sim binaries local.
 # -----------------------------------------------------------------------------
 
@@ -333,5 +334,10 @@ locate/calib/match_homography.json
 # å®˜æ–¹æ–‡æ¡£æœ¬åœ°å‰¯æœ¬ï¼ˆåè®®/è§„åˆ™ PDF ä¸æ–‡æœ¬æå–ï¼‰ã€‚ç‰ˆæƒå±å¤§ç–†ï¼Œåªç•™æœ¬åœ°ä¸è¿› gitã€‚
 refs/
 
-# ½¨Ä£×é¹¤×÷Ä¿Â¼£¨ÆäËû AI/¹¤¾ß²ú³ö£¬²»½ø git£©
+# åœºåœ°å»ºæ¨¡å®¡è®¡å·¥ä½œåŒºï¼ˆzaowu_auditï¼‰ï¼šåœ¨ç”¨ï¼Œæœ¬åœ°ä¿ç•™ï¼Œä¸è¿› gitã€‚
 zaowu_audit/
+
+# opencode ¹¤¾ß²úÎïÓë³¡¾°±¸·İ¿ìÕÕ£¬ÓÀ²»½ø¿â
+.playwright-mcp/
+*.bak_pre_*
+*.blend[0-9][0-9]

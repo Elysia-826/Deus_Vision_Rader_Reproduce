@@ -29,9 +29,9 @@ from numpy import uint8, zeros
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
-sys.path.insert(0, str(_ROOT / "scripts"))
 
-import visualize_two_stage as vis2  # noqa: E402
+from detect import PatternStage  # noqa: E402
+from detect.runtime import load_classifier, load_detector  # noqa: E402
 from locate.camera import camera_from_path  # noqa: E402
 from locate.ray_mesh import FieldMesh  # noqa: E402
 from track.observe import foot_pixel, observations_from_result  # noqa: E402
@@ -51,8 +51,8 @@ def _gt_label(name: str, team: str) -> str:
 def _load_detector():
     pose = camera_from_path(POSE_BLUE)
     mesh = FieldMesh.from_npz(MESH)
-    net, transform, device = vis2._load_classifier()
-    detector = vis2._load_detector(vis2.PatternStage(net=net, transform=transform, device=str(device)))
+    net, transform, device = load_classifier()
+    detector = load_detector(PatternStage(net=net, transform=transform, device=str(device)))
     detector.infer(zeros((3000, 4096, 3), dtype=uint8), persist_tracks=False)
     return pose, mesh, detector
 

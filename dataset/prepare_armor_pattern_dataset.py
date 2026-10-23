@@ -1,5 +1,8 @@
 """Reorganize RM2025 armor-pattern crops for X-AnyLabeling classification.
 
+一次性脚本（RM2025 公开集时代，保留备查）。--src 默认指向本机
+Downloads 下的公开集，换机器需重新指定。
+
 Keeps the original class folders (copy). Writes a flat X-AnyLabeling dir:
   classes.txt
   <class>__<stem>.jpg
@@ -171,7 +174,7 @@ def parse_args() -> argparse.Namespace:
         "--src",
         type=Path,
         default=Path(
-            r"C:\Users\YQS\Downloads\OneDrive_3_2026-8-21\RM2025-Armor-Pattern-Public-Dataset\RM2025-Armor-Pattern-Dataset"
+            Path.home() / "Downloads" / "RM2025-Armor-Pattern-Public-Dataset" / "RM2025-Armor-Pattern-Dataset"
         ),
     )
     parser.add_argument("--archive", type=Path, default=root / "armor_pattern")

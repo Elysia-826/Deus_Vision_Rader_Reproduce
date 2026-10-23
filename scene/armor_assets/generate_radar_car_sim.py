@@ -44,7 +44,7 @@ def argv_after_double_dash() -> list[str]:
 
 
 def parse_cli() -> tuple[Path, int, int, str, float, float]:
-    out = Path(r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\dataset\car_sim")
+    out = Path(__file__).resolve().parents[2] / "dataset" / "car_sim"
     count = 1000
     seed = 42
     motion = "random"

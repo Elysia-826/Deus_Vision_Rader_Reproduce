@@ -24,6 +24,8 @@ sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_SCRIPTS))
 
 import visualize_two_stage as vis2  # noqa: E402
+from detect import ImageReadError, PatternStage, warmup  # noqa: E402
+from detect.runtime import load_classifier, load_detector  # noqa: E402
 from detect.types import LinkedRobot  # noqa: E402
 from locate.camera import camera_from_path  # noqa: E402
 from locate.minimap import minimap_from_path  # noqa: E402
@@ -114,16 +116,14 @@ def main() -> None:
     calib = minimap_from_path(MINIMAP_JSON)
     frame = cv2.imread(str(SOURCE_PATH))
     if frame is None:
-        raise vis2.ImageReadError(SOURCE_PATH)
+        raise ImageReadError(SOURCE_PATH)
     minimap = cv2.imread(str(MINIMAP_IMAGE))
     if minimap is None:
-        raise vis2.ImageReadError(MINIMAP_IMAGE)
+        raise ImageReadError(MINIMAP_IMAGE)
 
-    net, transform, device = vis2._load_classifier()
-    detector = vis2._load_detector(
-        vis2.PatternStage(net=net, transform=transform, device=str(device))
-    )
-    vis2.warmup(detector, frame)
+    net, transform, device = load_classifier()
+    detector = load_detector(PatternStage(net=net, transform=transform, device=str(device)))
+    warmup(detector, frame)
     result = detector.infer(frame)
     canvas = vis2.draw_result(frame, result, 0.0)
     board = minimap.copy()

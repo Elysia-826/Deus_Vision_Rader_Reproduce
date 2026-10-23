@@ -8,9 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from models.pattern.model import PatternBackbone
 
-DEFAULT_PATTERN_DATA: Path = Path(
-    r"C:\Users\YQS\Downloads\OneDrive_3_2026-8-21\RM2025-Armor-Pattern-Public-Dataset"
-)
+DEFAULT_PATTERN_DATA: Path = Path("dataset/pattern_balanced")
 
 
 class PatternTrainJob(BaseModel):

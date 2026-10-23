@@ -8,9 +8,11 @@ from pathlib import Path
 import cv2
 from ultralytics import YOLO
 
-# ========== 填这里 ==========
-MODEL_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\weights\armor_best.engine"
-SOURCE_PATH = r"C:\Users\YQS\Desktop\DEUS_VISION_RADER_TEST_reproduce\scripts\RM_TestVideo.mp4"
+_ROOT = Path(__file__).resolve().parents[1]
+
+# ========== 填这里（默认已指向仓库内路径，按需改） ==========
+MODEL_PATH = str(_ROOT / "weights" / "armor_best.engine")  # 装甲 engine @192
+SOURCE_PATH = str(_ROOT / "scripts" / "RM_TestVideo.mp4")  # 本地测试视频（不进 git，须单独拷）
 IMGSZ = 192  # 装甲板 192；这份 engine 已按 192 编好
 CONF = 0.25
 DEVICE = 0

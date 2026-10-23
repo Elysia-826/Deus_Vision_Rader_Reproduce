@@ -1,9 +1,12 @@
 # ─── How to run ───
-#     python scripts/score_identity.py
-#     python scripts/score_identity.py scene/locate_out/identity_log.jsonl
+#     python scripts/score_identity_switches.py
+#     python scripts/score_identity_switches.py scene/locate_out/identity_log.jsonl
 # ──────────────────
 
-"""用仿真 JSONL 数每个真值 name 的身份切换。不看真实录像。"""
+"""身份切换统计：用仿真 JSONL 数每个真值 name 的身份切换次数。不看真实录像。
+
+与 score_identity_log.py（召回/误差/野点）互补：那个答"点得准不准"，
+这个答"槽位身份稳不稳"。"""
 
 from __future__ import annotations
 

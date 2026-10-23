@@ -1,7 +1,9 @@
 # ─── How to run ───
 #     python scripts/calibrate_pnp.py frame.jpg --intrinsics locate/calib/Camera_Radar_Blue.json
 #     python scripts/calibrate_pnp.py frame.jpg --intrinsics ... --out locate/calib/Camera_Field.json
-# 按提示点地标（顺序读 landmarks.json 的 click_order）。z 撤销，回车求解存盘。
+# 按提示点地标（顺序读 landmarks.json 的 click_order）。每次点击弹出 4 倍放大镜，
+# WASD 像素级微调（Shift=8px 步进），Enter/n 确认，z/ESC 取消本次点击；
+# 主窗口 z 撤销上一个点，回车求解存盘。
 # ──────────────────
 
 """真机 PnP 标定：地标点击 → CameraPose JSON（LOCATE_MODE=ray 直接可用）。
@@ -31,6 +33,12 @@ from locate.types import Pixel, WorldXYZ
 LANDMARKS = _ROOT / "locate" / "calib" / "landmarks.json"
 MAX_RESIDUAL_PX = 12.0  # 点击很糙也该 <12px；超了就是点错或坐标表错
 
+# 放大镜微调（借鉴 T-DT 标定交互）：点击后取周围 ±ZOOM_HALF px 放大 ZOOM_SCALE 倍，
+# 键盘步进把"手抖 3-5px"压到亚像素级操作。放大用最近邻，像素边界清晰。
+ZOOM_HALF = 64
+ZOOM_SCALE = 4
+_FAST_STEP = 8  # Shift+WASD 的步进
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -52,6 +60,58 @@ def main() -> None:
 
     clicks: list[Pixel] = []
 
+    def zoom_pick(start_x: int, start_y: int) -> Pixel | None:
+        """放大镜微调一次点击。返回确认后的像素；取消返回 None。
+
+        WASD/wasd 步进（Shift=8px），Enter/n/space 确认，z/ESC 取消本次点击。
+        ROI 窗口向图像边缘方向平移而非截断准心，保证准心始终可见。
+        """
+        height, width = image.shape[:2]
+        x, y = start_x, start_y
+        name = "pnp zoom"
+        while True:
+            # ROI 贴边时整体平移，准心保持在窗内（不在边缘被裁掉）
+            roi_x = min(max(x - ZOOM_HALF, 0), max(width - 2 * ZOOM_HALF, 0))
+            roi_y = min(max(y - ZOOM_HALF, 0), max(height - 2 * ZOOM_HALF, 0))
+            roi_w = min(2 * ZOOM_HALF, width - roi_x)
+            roi_h = min(2 * ZOOM_HALF, height - roi_y)
+            zoom = cv2.resize(
+                image[roi_y : roi_y + roi_h, roi_x : roi_x + roi_w],
+                (roi_w * ZOOM_SCALE, roi_h * ZOOM_SCALE),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            cx = (x - roi_x) * ZOOM_SCALE
+            cy = (y - roi_y) * ZOOM_SCALE
+            bar = 30
+            cv2.line(zoom, (cx, cy - bar), (cx, cy + bar), (0, 0, 255), 1)
+            cv2.line(zoom, (cx - bar, cy), (cx + bar, cy), (0, 0, 255), 1)
+            cv2.putText(
+                zoom, f"x={x} y={y}", (8, 26),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
+            )
+            cv2.putText(
+                zoom, "WASD move(Shift=8px)  Enter/n=ok  z/ESC=cancel",
+                (8, zoom.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1,
+            )
+            cv2.imshow(name, zoom)
+            key = cv2.waitKey(20) & 0xFF
+            if key in {ord("w"), ord("W")}:
+                y -= _FAST_STEP if key == ord("W") else 1
+            elif key in {ord("s"), ord("S")}:
+                y += _FAST_STEP if key == ord("S") else 1
+            elif key in {ord("a"), ord("A")}:
+                x -= _FAST_STEP if key == ord("A") else 1
+            elif key in {ord("d"), ord("D")}:
+                x += _FAST_STEP if key == ord("D") else 1
+            elif key in {13, 10, ord("n"), ord("N"), ord(" ")}:
+                cv2.destroyWindow(name)
+                return Pixel(u=float(x), v=float(y))
+            elif key in {27, ord("z"), ord("Z")}:
+                cv2.destroyWindow(name)
+                return None
+            x = min(max(x, 0), width - 1)
+            y = min(max(y, 0), height - 1)
+
     def redraw(hint: str) -> None:
         canvas = image.copy()
         for index, pixel in enumerate(clicks):
@@ -68,7 +128,10 @@ def main() -> None:
         del flags, param
         if event != cv2.EVENT_LBUTTONDOWN or len(clicks) >= len(order):
             return
-        clicks.append(Pixel(u=float(x), v=float(y)))
+        picked = zoom_pick(x, y)
+        if picked is None:
+            return
+        clicks.append(picked)
         redraw(_hint(clicks, order, table))
 
     cv2.imshow("pnp calib", image)
