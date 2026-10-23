@@ -57,7 +57,12 @@ from track.log import append_frame  # noqa: E402
 from track.observe import observations_from_result  # noqa: E402
 from track.truth import parse_sim_robots  # noqa: E402
 from track.types import PublishedTrack, SimRobot, Team, TrackPhase  # noqa: E402
-from visualize_official import OfficialRecorder, build_official_frame, warn_once_if_no_cjk  # noqa: E402
+from visualize_official import (  # noqa: E402
+    OfficialDataLog,
+    OfficialRecorder,
+    build_official_frame,
+    warn_once_if_no_cjk,
+)
 
 # ========== 开关 ==========
 # RADAR_SOURCE / RADAR_IMAGES_DIR 环境变量可覆盖（打分跑批用，不用改代码）。
@@ -318,13 +323,16 @@ def main() -> None:
             "========================================================\n",
             flush=True,
         )
-    if source is FrameSource.HIK:
-        warn_once_if_no_cjk()  # 考核字幕要中文，缺字体现在说，别录完才发现
-        if RECORD:
-            print(
-                f"run_radar record -> {RECORD_PATH.name} @ {RECORD_FPS:.0f}fps 1920x1080",
-                flush=True,
-            )
+    # 缺中文字体警告不能只看 hik：用仿真/回放录考核片、跑在没装中文字体的
+    # Linux 上同样会出 ASCII 兜底字幕——只要这帧画面/录像会出现就提醒。
+    if (not HEADLESS) or RECORD:
+        warn_once_if_no_cjk()
+    if RECORD:
+        print(
+            f"run_radar record -> {RECORD_PATH.name} @ {RECORD_FPS:.0f}fps 1920x1080"
+            f"  + 数据表 {RECORD_PATH.with_suffix('.csv').name}",
+            flush=True,
+        )
 
     _preflight_gpu()
 
@@ -395,14 +403,17 @@ def main() -> None:
         IDENTITY_LOG.parent.mkdir(parents=True, exist_ok=True)
         IDENTITY_LOG.write_text("", encoding="utf-8")
     recorder: OfficialRecorder | None = None
+    data_log: OfficialDataLog | None = None
     if RECORD:
         recorder = OfficialRecorder(RECORD_PATH, RECORD_FPS)
+        data_log = OfficialDataLog(RECORD_PATH.with_suffix(".csv"))
     if not HEADLESS:
         # 基座那块 1920×1080（4.2.5）：窗口名固定 radar，全屏由
         # RADAR_FULLSCREEN=1 切换——上场机直接把合成画面铺满屏。
         cv2.namedWindow("radar", cv2.WINDOW_NORMAL)
         if FULLSCREEN:
             cv2.setWindowProperty("radar", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    fullscreen_reapplied = False  # 窗口映射前设的属性部分后端会丢，imshow 后补一次
     print("run_radar waiting for frames…", flush=True)
     while True:
         truth: tuple[SimRobot, ...] = ()
@@ -561,9 +572,16 @@ def main() -> None:
         )
         if recorder is not None:
             recorder.write(official)
+        if data_log is not None:
+            data_log.log(last_frame, publishes, truth)
         if HEADLESS:
             continue
         cv2.imshow("radar", official)
+        if FULLSCREEN and not fullscreen_reapplied:
+            # 窗口实际映射后再设一次：部分后端会丢掉映射前的属性，
+            # 基座屏上出标题栏就不是 1:1 的 1920×1080。
+            cv2.setWindowProperty("radar", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            fullscreen_reapplied = True
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
@@ -571,6 +589,8 @@ def main() -> None:
         cap.release()
     if recorder is not None:
         recorder.release()
+    if data_log is not None:
+        data_log.close()
     if referee_stub is not None:
         summary = referee_stub.summary()
         print(

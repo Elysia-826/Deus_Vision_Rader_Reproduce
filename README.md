@@ -122,7 +122,7 @@ python scripts/score_referee.py
 | `RADAR_PHASE_SCALE` | `0.05` | 比赛阶段时间压缩比 |
 | `RADAR_SENTRY_GUIDE` | `0` | 1 = 0x0301 哨兵引导 |
 | `RADAR_CAMERA_NAME` | `Camera_Radar_Blue` | 真机相机名（红方上场必须设 Red，决定外参 + 颜色先验） |
-| `RADAR_RECORD` | `0` | 1 = 录 1920×1080 官方合成（相机画面 + 自划区域图 + 字幕/数据表），基座 HDMI 屏与录像同像素 |
+| `RADAR_RECORD` | `0` | 1 = 录 1920×1080 官方合成（相机画面 + 自划区域图 + 字幕/数据表）+ 同步 CSV 数据记录表（`同名.csv`，帧号与视频右下角一致，考核交表用） |
 | `RADAR_RECORD_PATH` | `scene/locate_out/official_record.mp4` | 录像输出路径 |
 | `RADAR_RECORD_FPS` | `10` | 录像帧率（仿真 10Hz；真机相机源设 25/30） |
 | `RADAR_FULLSCREEN` | `0` | 1 = 显示窗口全屏（上场机接基座 HDMI 屏） |

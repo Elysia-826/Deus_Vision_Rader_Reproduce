@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import csv
 import os
 from pathlib import Path
 from typing import Final
@@ -112,7 +113,9 @@ def caption_text(track: PublishedTrack, err: float | None, *, cjk: bool = True) 
         mark = "T" if err < _ACCURATE_M else "F"
         prefix = "误差" if cjk else "err"
         err_text = f"{prefix} {err:.2f}m {mark}"
-    coast = "〔外推〕" if (cjk and track.phase is TrackPhase.LOST) else ("" if cjk else " [coast]")
+    coast = ""
+    if track.phase is TrackPhase.LOST:
+        coast = "〔外推〕" if cjk else " [coast]"
     return f"{role_name(track.label, track.team, cjk=cjk)}  ( {track.x:6.2f}, {track.y:6.2f} )m  {err_text}{coast}"
 
 
@@ -246,11 +249,13 @@ def build_official_frame(
     table_y = map_y + mh + 34
 
     # ── 底部字幕条：半透明黑底压在相机画面下沿 ──
+    # 覆盖整条相机宽度（cw 是缩放后的宽）——不是 ch（高）：4096×3000
+    # 铺进来约 1472×1078，按高切只压暗到第 1078 列，右边 ~400px 漏亮。
     band_lines = _band_lines(rows)
     if band_lines:
         band_y0 = OFFICIAL_H - _BAND_H
-        roi = canvas[band_y0 : band_y0 + _BAND_H, 0:ch]
-        canvas[band_y0 : band_y0 + _BAND_H, 0:ch] = (roi * 0.45).astype(np.uint8)
+        roi = canvas[band_y0 : band_y0 + _BAND_H, 0:cw]
+        canvas[band_y0 : band_y0 + _BAND_H, 0:cw] = (roi * 0.45).astype(np.uint8)
 
     # ── 文本统一收集，末尾一次性渲染（有字体走 PIL，没字体 cv2 ASCII）──
     texts: list[tuple[int, int, str, tuple[int, int, int], int]] = []
@@ -335,3 +340,66 @@ class OfficialRecorder:
         self._writer.release()
         size_mb = self._path.stat().st_size / 1e6 if self._path.is_file() else 0.0
         print(f"record done: {self._path}  frames {self._frames}  {size_mb:.1f} MB", flush=True)
+
+
+class OfficialDataLog:
+    """考核数据记录表：与录像逐帧对得上的 CSV。
+
+    视频右下角印着帧号，CSV 每行带同一个帧号——评委拿表对帧核。
+    列值和画面字幕同源（caption 用的 role_name / error_vs_truth /
+    0.8m 判定），表、字幕、视频三者不会各说各话。
+    帧里没发布的槽不写行（画面上没有的东西表里也不能有）。
+    """
+
+    _HEADER: Final = (
+        "帧号",
+        "槽位",
+        "兵种",
+        "阵营",
+        "x米",
+        "y米",
+        "状态",
+        "误差米",
+        "判定",
+    )
+
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # utf-8-sig：Excel 直接双击打开不乱码（评委拿 Windows 看表）
+        self._handle = self._path.open("w", encoding="utf-8-sig", newline="")
+        self._writer = csv.writer(self._handle)
+        self._writer.writerow(self._HEADER)
+        self._rows = 0
+
+    def log(
+        self,
+        frame_no: int,
+        publishes: tuple[PublishedTrack, ...],
+        truth: tuple[SimRobot, ...],
+    ) -> None:
+        for item in publishes:
+            err = error_vs_truth(item, truth)
+            if err is None:
+                err_text, verdict = "--", "--"
+            else:
+                err_text, verdict = f"{err:.2f}", ("T" if err < _ACCURATE_M else "F")
+            self._writer.writerow(
+                (
+                    frame_no,
+                    item.label,
+                    role_name(item.label, item.team, cjk=True),
+                    _TEAM_CN.get(item.team, item.team.value),
+                    f"{item.x:.2f}",
+                    f"{item.y:.2f}",
+                    "外推" if item.phase is TrackPhase.LOST else "已确认",
+                    err_text,
+                    verdict,
+                )
+            )
+            self._rows += 1
+
+    def close(self) -> None:
+        self._handle.close()
+        size_kb = self._path.stat().st_size / 1e3 if self._path.is_file() else 0.0
+        print(f"data log done: {self._path}  rows {self._rows}  {size_kb:.1f} KB", flush=True)

@@ -71,6 +71,19 @@ def test_caption_text_carries_accuracy_marks() -> None:
     assert "〔外推〕" in coasting  # 盲推坐标要看得出来
 
 
+def test_caption_ascii_fallback_does_not_coast_everything() -> None:
+    """无中文字体的 Linux 上场机：只有 LOST 才带 [coast]，CONFIRMED 不许带。
+
+    旧版三元表达式在 cjk=False 时给所有车都追加 [coast]——评委看到
+    每台已确认的车都在「外推」，考核直接判错。"""
+    confirmed = vo.caption_text(_publish("R3", Team.RED, 2.0, 1.0), 0.3, cjk=False)
+    assert "coast" not in confirmed
+    assert confirmed.endswith("T")
+
+    lost = vo.caption_text(_publish("R3", Team.RED, 2.0, 1.0, phase=TrackPhase.LOST), 0.3, cjk=False)
+    assert lost.endswith("[coast]")
+
+
 def test_caption_rows_sorts_enemy_first() -> None:
     publishes = (
         _publish("B1", Team.BLUE, 1.0, 1.0),
@@ -135,6 +148,20 @@ def test_official_frame_with_empty_publishes() -> None:
     assert frame.shape == (vo.OFFICIAL_H, vo.OFFICIAL_W, 3)
 
 
+def test_band_darkens_full_camera_width() -> None:
+    """字幕底条必须压暗整条相机宽度——旧版拿 ch（高）当列数切，右端 ~400px 漏亮，
+    长字幕画在没压暗的画面上。探的是干净背景行（文本从 band_y0+8 才起笔）。"""
+    camera = np.full((3000, 4096, 3), 255, dtype=np.uint8)  # 全白相机：哪里没压暗哪里亮
+    publishes = (_publish("R3", Team.RED, 1.0, 1.0),)
+    frame = vo.build_official_frame(camera, _fake_board(), publishes, (), frame_no=1, fps=10.0)
+    band_y0 = vo.OFFICIAL_H - vo._BAND_H
+    bg_row = frame[band_y0 + 4]  # 文本起笔前的背景行
+    assert bg_row[100:400].max() < 150, "底条左段没压暗"
+    assert bg_row[1150:1460].max() < 150, "底条右段没压暗（ch 当列数切的旧病）"
+    # 底条上方的相机区保持亮（压暗没越界）
+    assert frame[band_y0 - 20, 1150:1460].min() > 240
+
+
 # ---------- 录像出口 ----------
 
 
@@ -167,6 +194,43 @@ def test_recorder_rejects_wrong_size(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         recorder.write(np.zeros((720, 1280, 3), dtype=np.uint8))
     recorder.release()
+
+
+# ---------- 考核数据记录表（与录像逐帧对得上） ----------
+
+
+def test_data_log_rows_match_captions(tmp_path: Path) -> None:
+    """CSV 的兵种/误差/判定必须和画面字幕同源同值——评委拿表对帧核。"""
+    import csv as csv_mod
+
+    log = vo.OfficialDataLog(tmp_path / "record.csv")
+    publishes = (
+        _publish("R1", Team.RED, 2.0, 1.0),
+        _publish("RS", Team.RED, 4.0, 4.0, phase=TrackPhase.LOST),
+    )
+    truth = (
+        _gt("R1", Team.RED, 2.3, 1.0),  # d=0.30 → T
+        _gt("RS", Team.RED, 5.0, 4.0),  # d=1.00 → F
+    )
+    log.log(42, publishes, truth)
+    log.close()
+
+    with (tmp_path / "record.csv").open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv_mod.reader(handle))
+    assert rows[0] == ["帧号", "槽位", "兵种", "阵营", "x米", "y米", "状态", "误差米", "判定"]
+    assert rows[1] == ["42", "R1", "红方重装", "红方", "2.00", "1.00", "已确认", "0.30", "T"]
+    assert rows[2] == ["42", "RS", "红方哨兵", "红方", "4.00", "4.00", "外推", "1.00", "F"]
+
+
+def test_data_log_marks_missing_truth_as_unknown(tmp_path: Path) -> None:
+    import csv as csv_mod
+
+    log = vo.OfficialDataLog(tmp_path / "record.csv")
+    log.log(7, (_publish("B3", Team.BLUE, 1.0, 2.0),), ())  # 真机没真值
+    log.close()
+    with (tmp_path / "record.csv").open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv_mod.reader(handle))
+    assert rows[1][7] == "--" and rows[1][8] == "--"  # 误差/判定都不臆造
 
 
 # ---------- 字形完整性（考核画面的字不许是空框） ----------
