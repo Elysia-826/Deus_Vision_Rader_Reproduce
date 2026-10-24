@@ -9,6 +9,10 @@ confirmed 虚报的互斥三类分解（会上裁判的虚报 = confirmed）：
 - b 同名在场但 ≥2.5 m → wrong_position；
 - c 场上没有这个槽对应的车 → no_robot；
 - 一条发布只能进一类。
+
+confirmed 标记的裁判 d 分级（grade_confirmed，只数 confirmed）：
+- 0.79 m → accurate；0.80 m → semi；1.60 m → error；
+- 场上没有同名真值 → error（d 无定义）。
 """
 
 from __future__ import annotations
@@ -195,3 +199,61 @@ def test_err_by_state_splits_correct_errors() -> None:
     stats = {state: (median, maximum, n) for state, median, maximum, n in report.err_by_state}
     assert stats["confirmed"] == (1.0, 1.0, 1)
     assert stats["lost"] == (2.0, 2.0, 1)
+
+
+def test_grade_accurate_below_0_8m() -> None:
+    """d = 0.79 m → 准确档。"""
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 0.0, 0.0)
+    grade, d = sfr.grade_confirmed((red_infantry,), _pred("R3", 0.79, 0.0))
+    assert grade == sfr.GRADE_ACCURATE
+    assert d is not None and abs(d - 0.79) < 1e-9
+
+
+def test_grade_semi_at_0_8m() -> None:
+    """d = 0.80 m → 半准确档（0.8 ≤ d < 1.6）。"""
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 0.0, 0.0)
+    grade, _d = sfr.grade_confirmed((red_infantry,), _pred("R3", 0.80, 0.0))
+    assert grade == sfr.GRADE_SEMI
+
+
+def test_grade_error_at_1_6m() -> None:
+    """d = 1.60 m → 错误档（d ≥ 1.6）。"""
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 0.0, 0.0)
+    grade, _d = sfr.grade_confirmed((red_infantry,), _pred("R3", 1.60, 0.0))
+    assert grade == sfr.GRADE_ERROR
+
+
+def test_grade_error_without_same_name_gt() -> None:
+    """场上没有同名真值 → 错误档，d 无定义。"""
+    red_hero = _gt("Robot_Hero_Red", "red", 3.0, 3.0)
+    grade, d = sfr.grade_confirmed((red_hero,), _pred("R3", 0.1, 0.0))
+    assert grade == sfr.GRADE_ERROR
+    assert d is None
+
+
+def test_d_line_counts_confirmed_only_and_splits_errors() -> None:
+    """准线只收 confirmed；错误档拆「同名 ≥1.6 m」和「没有这台车」。"""
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 0.0, 0.0)
+    red_hero = _gt("Robot_Hero_Red", "red", 4.0, 4.0)
+    frames = [
+        (
+            (red_infantry, red_hero),
+            (
+                _pred("R3", 0.79, 0.0),  # accurate
+                _pred("R3", 1.0, 0.0),  # semi
+                _pred("R3", 3.0, 0.0),  # error：同名在场但 ≥1.6 m
+                _pred("R4", 0.0, 0.0),  # error：场上没有步兵 4
+                _pred("R3", 1.0, 0.0, "lost"),  # 非 confirmed，不进准线
+            ),
+        )
+    ]
+    report = sfr.count_frames(frames)
+    assert report.confirmed_graded == 4
+    assert dict(report.grade_counts) == {
+        sfr.GRADE_ACCURATE: 1,
+        sfr.GRADE_SEMI: 1,
+        sfr.GRADE_ERROR: 2,
+    }
+    assert report.error_same_name == 1
+    assert report.error_no_robot == 1
+    assert report.grade_d_n == 3  # 无此车那条没有定义 d

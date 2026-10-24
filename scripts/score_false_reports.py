@@ -15,6 +15,12 @@ confirmed，并把它拆成互斥三类（classify_false）：
   b. wrong_position 同名真值在场但 ≥2.5 m
   c. no_robot       场上没有这个槽对应的车
 
+confirmed 标记的裁判 d 分级准线（grade_confirmed，只数 confirmed）：
+  accurate  d < 0.8 m    semi  0.8 ≤ d < 1.6 m
+  error     d ≥ 1.6 m 或场上没有这台车
+阈值 import referee/stub.py（规则手册 5.6.6 stub 复刻同源）——不用 2.5 m
+当「对」。
+
 score_identity_log.py 的 matched 是最近邻口径：槽名错了但位置贴近某台车
 会被算成命中——那不能当发布门的成功线。本文件按身份判，才是。
 
@@ -36,6 +42,7 @@ if str(_ROOT) not in sys.path:
 
 from locate.camera import camera_from_path  # noqa: E402
 from locate.types import WorldXYZ  # noqa: E402
+from referee.stub import ACCURATE_M, SEMI_ACCURATE_M  # noqa: E402
 from track.truth import sim_robot_from_mapping  # noqa: E402
 from track.types import SimRobot  # noqa: E402
 
@@ -54,6 +61,12 @@ GATE_M: Final = 2.5  # 同名真值必须在这个距离内，发布才算对
 FALSE_TEAM_SWAP: Final = "team_swap"  # a. 队伍认错：2.5 m 内有同兵种、反队的真值
 FALSE_WRONG_POSITION: Final = "wrong_position"  # b. 同名真值在场，但 ≥2.5 m
 FALSE_NO_ROBOT: Final = "no_robot"  # c. 场上没有这个槽对应的车
+
+# confirmed 发布的裁判 d 分级（阈值 import referee/stub.py，和规则手册 5.6.6
+# 的 stub 复刻同源——不再用 2.5 m 当「对」，对的就是 <0.8 m）。
+GRADE_ACCURATE: Final = "accurate"  # d < 0.8 m
+GRADE_SEMI: Final = "semi"  # 0.8 m ≤ d < 1.6 m
+GRADE_ERROR: Final = "error"  # d ≥ 1.6 m，或场上没有这台车（d 无定义）
 
 
 def _visible(pose, x: float, y: float, z: float) -> bool:
@@ -114,6 +127,25 @@ def classify_false(gt: Sequence[GtEntry], pred: PredEntry) -> str:
     return FALSE_NO_ROBOT
 
 
+def grade_confirmed(gt: Sequence[GtEntry], pred: PredEntry) -> tuple[str, float | None]:
+    """confirmed 发布按裁判 d 分级（和 referee/stub.py 同源阈值）。
+
+    只数 confirmed——lost/tentative 默认不进 0x0305，不混进准线。
+    返回 (档, d)；场上没有同名真值时 d 无定义，直接判错误档。
+    """
+    best = min(
+        (((pred.x - g.x) ** 2 + (pred.y - g.y) ** 2) ** 0.5 for g in gt if g.label == pred.slot),
+        default=None,
+    )
+    if best is None:
+        return GRADE_ERROR, None
+    if best < ACCURATE_M:
+        return GRADE_ACCURATE, best
+    if best < SEMI_ACCURATE_M:
+        return GRADE_SEMI, best
+    return GRADE_ERROR, best
+
+
 @dataclass(frozen=True, slots=True)
 class Report:
     frames: int
@@ -130,6 +162,13 @@ class Report:
     referee_bound_false: int  # 会上裁判的虚报 = confirmed 虚报（默认发送路径）
     confirmed_false_kinds: tuple[tuple[str, int], ...]  # confirmed 虚报 a/b/c 分解
     err_by_state: tuple[tuple[str, float, float, int], ...]  # 每态正确发布的 (median, max, n)
+    confirmed_graded: int  # 进 d 准线的 confirmed 条数
+    grade_counts: tuple[tuple[str, int], ...]  # accurate / semi / error 条数
+    error_same_name: int  # 错误档里同名在场但 ≥1.6 m
+    error_no_robot: int  # 错误档里场上没有这台车
+    grade_d_median: float | None  # 中位（只算有定义的 d；无此车的错误档没有 d）
+    grade_d_max: float | None
+    grade_d_n: int  # 有定义 d 的条数
 
 
 def count_frame(gt: Sequence[GtEntry], preds: Sequence[PredEntry]) -> FrameCounts:
@@ -185,6 +224,9 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
     state_counts: dict[str, int] = {}
     correct_state_errors: list[tuple[str, float]] = []
     confirmed_false_kinds: dict[str, int] = {}
+    grade_counts: dict[str, int] = {}
+    error_same_name = error_no_robot = 0
+    grade_ds: list[float] = []
     for gt, preds in frames:
         counts = count_frame(gt, preds)
         gt_total += len(gt)
@@ -203,7 +245,18 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
                 confirmed_false_kinds[kind] = confirmed_false_kinds.get(kind, 0) + 1
         for pred in preds:
             state_counts[pred.state] = state_counts.get(pred.state, 0) + 1
+            if pred.state != "confirmed":
+                continue  # d 准线只数 confirmed：lost/tentative 默认不进 0x0305
+            grade, d = grade_confirmed(gt, pred)
+            grade_counts[grade] = grade_counts.get(grade, 0) + 1
+            if d is None:
+                error_no_robot += 1
+            else:
+                grade_ds.append(d)
+                if grade is GRADE_ERROR:
+                    error_same_name += 1
     ordered = sorted(errors)
+    grade_ordered = sorted(grade_ds)
     return Report(
         frames=len(frames),
         gt_total=gt_total,
@@ -219,6 +272,13 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
         referee_bound_false=false_by_state.get("confirmed", 0),
         confirmed_false_kinds=tuple(sorted(confirmed_false_kinds.items())),
         err_by_state=_state_err_stats(correct_state_errors),
+        confirmed_graded=sum(grade_counts.values()),
+        grade_counts=tuple(sorted(grade_counts.items())),
+        error_same_name=error_same_name,
+        error_no_robot=error_no_robot,
+        grade_d_median=grade_ordered[len(grade_ordered) // 2] if grade_ordered else None,
+        grade_d_max=grade_ordered[-1] if grade_ordered else None,
+        grade_d_n=len(grade_ordered),
     )
 
 
@@ -284,6 +344,26 @@ def report_lines(log: Path, report: Report) -> list[str]:
     lines.append(
         f"  confirmed kinds: {_fmt_pair(report.confirmed_false_kinds)}"
     )
+    total = report.confirmed_graded
+    if total:
+        bands = " ".join(
+            f"{grade}={count} ({count / total * 100:.1f}%)"
+            for grade, count in report.grade_counts
+        )
+    else:
+        bands = "-"
+    lines.append(f"confirmed_d_line: n={total} {bands}")
+    lines.append(
+        f"  error split: same_name_ge_1.6m={report.error_same_name} "
+        f"no_robot={report.error_no_robot}"
+    )
+    if report.grade_d_median is not None:
+        lines.append(
+            f"  d median={report.grade_d_median:.3f}m max={report.grade_d_max:.3f}m "
+            f"(defined d only, n={report.grade_d_n})"
+        )
+    else:
+        lines.append("  d median=- max=- (no defined d)")
     lines.append(f"misses={report.misses}")
     lines.append(f"correct={report.correct}")
     if report.errors:
