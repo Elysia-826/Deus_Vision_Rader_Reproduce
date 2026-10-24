@@ -21,6 +21,11 @@ confirmed 标记的裁判 d 分级准线（grade_confirmed，只数 confirmed）
 阈值 import referee/stub.py（规则手册 5.6.6 stub 复刻同源）——不用 2.5 m
 当「对」。
 
+confirmed 发布的混淆表（stick_class，只数 confirmed）：在全部真值里找
+2.5 m 内最近的一台车（不管同名不同名）——贴错记「发布槽 → 实际槽」一对
+（槽名保持 R1/B3/RS 原样），贴对不进表，附近没车单独计数；一条发布只进
+一类，不用 0.8 m 再分一次。
+
 score_identity_log.py 的 matched 是最近邻口径：槽名错了但位置贴近某台车
 会被算成命中——那不能当发布门的成功线。本文件按身份判，才是。
 
@@ -67,6 +72,16 @@ FALSE_NO_ROBOT: Final = "no_robot"  # c. 场上没有这个槽对应的车
 GRADE_ACCURATE: Final = "accurate"  # d < 0.8 m
 GRADE_SEMI: Final = "semi"  # 0.8 m ≤ d < 1.6 m
 GRADE_ERROR: Final = "error"  # d ≥ 1.6 m，或场上没有这台车（d 无定义）
+
+# confirmed 发布贴着谁（混淆表口径）：2.5 m 内最近的一台真值，不管同名不同名。
+# 一条发布只进一类；不用 0.8 m 再分一次（d 分级表已有那张尺子）。
+STICK_WRONG: Final = "stick_wrong"  # 贴错：最近车槽名 ≠ 发布槽名，记「发布槽→实际槽」
+STICK_RIGHT: Final = "stick_right"  # 贴对：最近车就是同名车且 <2.5 m
+STICK_NONE: Final = "stick_none"  # 附近没车：2.5 m 内没有任何真值
+# 贴错对的互斥三类构成（槽名保持 R1/B3/RS 原样，不翻译兵种）
+WRONG_SAME_ROLE_OPP_TEAM: Final = "same_role_opp_team"  # 同兵种反队（R1→B1）
+WRONG_SAME_TEAM_DIFF_ROLE: Final = "same_team_diff_role"  # 同队异兵种（R3→R1）
+WRONG_BOTH_DIFF: Final = "both_diff"  # 又反队又异兵种（R1→B3）
 
 
 def _visible(pose, x: float, y: float, z: float) -> bool:
@@ -146,6 +161,36 @@ def grade_confirmed(gt: Sequence[GtEntry], pred: PredEntry) -> tuple[str, float 
     return GRADE_ERROR, best
 
 
+def stick_class(gt: Sequence[GtEntry], pred: PredEntry) -> tuple[str, str | None]:
+    """confirmed 发布贴着哪台真值：2.5 m 内最近的一台（不管同名不同名）。
+
+    贴对 → (STICK_RIGHT, 同名槽)；贴错 → (STICK_WRONG, 实际贴着的槽)，
+    记「发布槽 → 实际槽」一对；附近没车 → (STICK_NONE, None)。一条发布
+    只进一类。距离并列时按槽名字典序取，保证可复现。
+    """
+    nearest = min(
+        ((((pred.x - g.x) ** 2 + (pred.y - g.y) ** 2) ** 0.5, g.label) for g in gt),
+        default=None,
+    )
+    if nearest is None or nearest[0] >= GATE_M:
+        return STICK_NONE, None
+    _distance, label = nearest
+    if label == pred.slot:
+        return STICK_RIGHT, label
+    return STICK_WRONG, label
+
+
+def wrong_pair_kind(from_slot: str, to_slot: str) -> str:
+    """贴错对的互斥三类构成。贴错保证两槽不同名，三类覆盖全部情况。"""
+    team_diff = to_slot[0] != from_slot[0]
+    role_diff = to_slot[1:] != from_slot[1:]
+    if team_diff and not role_diff:
+        return WRONG_SAME_ROLE_OPP_TEAM
+    if role_diff and not team_diff:
+        return WRONG_SAME_TEAM_DIFF_ROLE
+    return WRONG_BOTH_DIFF
+
+
 @dataclass(frozen=True, slots=True)
 class Report:
     frames: int
@@ -169,6 +214,11 @@ class Report:
     grade_d_median: float | None  # 中位（只算有定义的 d；无此车的错误档没有 d）
     grade_d_max: float | None
     grade_d_n: int  # 有定义 d 的条数
+    stick_wrong: int  # 贴错：2.5 m 内最近真值是别的车
+    stick_right: int  # 贴对：最近真值就是同名车
+    stick_none: int  # 附近没车：2.5 m 内没有任何真值
+    confusion_pairs: tuple[tuple[str, str, int], ...]  # 「发布槽→实际槽」按次数降序
+    wrong_split: tuple[tuple[str, int], ...]  # 贴错三类互斥构成
 
 
 def count_frame(gt: Sequence[GtEntry], preds: Sequence[PredEntry]) -> FrameCounts:
@@ -227,6 +277,9 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
     grade_counts: dict[str, int] = {}
     error_same_name = error_no_robot = 0
     grade_ds: list[float] = []
+    stick_wrong = stick_right = stick_none = 0
+    confusion: dict[tuple[str, str], int] = {}
+    wrong_split: dict[str, int] = {}
     for gt, preds in frames:
         counts = count_frame(gt, preds)
         gt_total += len(gt)
@@ -246,7 +299,7 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
         for pred in preds:
             state_counts[pred.state] = state_counts.get(pred.state, 0) + 1
             if pred.state != "confirmed":
-                continue  # d 准线只数 confirmed：lost/tentative 默认不进 0x0305
+                continue  # d 准线和混淆表都只数 confirmed：lost/tentative 不进 0x0305
             grade, d = grade_confirmed(gt, pred)
             grade_counts[grade] = grade_counts.get(grade, 0) + 1
             if d is None:
@@ -255,6 +308,17 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
                 grade_ds.append(d)
                 if grade is GRADE_ERROR:
                     error_same_name += 1
+            stick, actual = stick_class(gt, pred)
+            if stick is STICK_RIGHT:
+                stick_right += 1
+            elif stick is STICK_NONE:
+                stick_none += 1
+            else:
+                stick_wrong += 1
+                pair = (pred.slot, str(actual))
+                confusion[pair] = confusion.get(pair, 0) + 1
+                kind = wrong_pair_kind(pair[0], pair[1])
+                wrong_split[kind] = wrong_split.get(kind, 0) + 1
     ordered = sorted(errors)
     grade_ordered = sorted(grade_ds)
     return Report(
@@ -279,6 +343,14 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
         grade_d_median=grade_ordered[len(grade_ordered) // 2] if grade_ordered else None,
         grade_d_max=grade_ordered[-1] if grade_ordered else None,
         grade_d_n=len(grade_ordered),
+        stick_wrong=stick_wrong,
+        stick_right=stick_right,
+        stick_none=stick_none,
+        confusion_pairs=tuple(
+            (pair[0], pair[1], count)
+            for pair, count in sorted(confusion.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
+        wrong_split=tuple(sorted(wrong_split.items())),
     )
 
 
@@ -364,6 +436,17 @@ def report_lines(log: Path, report: Report) -> list[str]:
         )
     else:
         lines.append("  d median=- max=- (no defined d)")
+    lines.append(
+        f"confirmed_stick: wrong={report.stick_wrong} right={report.stick_right} "
+        f"none={report.stick_none}"
+    )
+    if report.confusion_pairs:
+        pairs_txt = " ".join(
+            f"{from_slot}->{to_slot}={count}"
+            for from_slot, to_slot, count in report.confusion_pairs
+        )
+        lines.append(f"  confusion pairs (desc): {pairs_txt}")
+    lines.append(f"  wrong split: {_fmt_pair(report.wrong_split)}")
     lines.append(f"misses={report.misses}")
     lines.append(f"correct={report.correct}")
     if report.errors:

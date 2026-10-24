@@ -13,6 +13,12 @@ confirmed 虚报的互斥三类分解（会上裁判的虚报 = confirmed）：
 confirmed 标记的裁判 d 分级（grade_confirmed，只数 confirmed）：
 - 0.79 m → accurate；0.80 m → semi；1.60 m → error；
 - 场上没有同名真值 → error（d 无定义）。
+
+confirmed 发布的混淆表（stick_class，只数 confirmed）：
+- 贴着反队同兵种 → 贴错，记「发布槽 → 实际槽」一对；
+- 贴着同名且 <2.5 m → 贴对，不进混淆表；
+- 2.5 m 内没有任何真值 → 附近没车，单独计数；
+- 一条发布不能同时进两类。
 """
 
 from __future__ import annotations
@@ -257,3 +263,85 @@ def test_d_line_counts_confirmed_only_and_splits_errors() -> None:
     assert report.error_same_name == 1
     assert report.error_no_robot == 1
     assert report.grade_d_n == 3  # 无此车那条没有定义 d
+
+
+def test_stick_wrong_opposite_team_same_role_records_pair() -> None:
+    """贴着反队同兵种的车 → 贴错，记「发布槽 → 实际槽」一对。"""
+    blue_hero = _gt("Robot_Hero_Blue", "blue", 0.0, 0.0)
+    stick, actual = sfr.stick_class((blue_hero,), _pred("R1", 0.4, 0.0))
+    assert stick == sfr.STICK_WRONG
+    assert actual == "B1"
+    report = sfr.count_frames((((blue_hero,), (_pred("R1", 0.4, 0.0),)),))
+    assert report.stick_wrong == 1
+    assert report.confusion_pairs == (("R1", "B1", 1),)
+    assert dict(report.wrong_split) == {sfr.WRONG_SAME_ROLE_OPP_TEAM: 1}
+
+
+def test_stick_right_same_name_within_gate() -> None:
+    """贴着同名车且 <2.5 m → 贴对，不进混淆表。"""
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 0.0, 0.0)
+    stick, actual = sfr.stick_class((red_infantry,), _pred("R3", 2.0, 0.0))
+    assert stick == sfr.STICK_RIGHT
+    assert actual == "R3"
+    report = sfr.count_frames((((red_infantry,), (_pred("R3", 2.0, 0.0),)),))
+    assert report.stick_right == 1
+    assert report.stick_wrong == 0
+    assert report.confusion_pairs == ()
+
+
+def test_stick_none_when_no_gt_within_gate() -> None:
+    """2.5 m 内没有任何真值 → 附近没车，不进混淆对。"""
+    red_hero = _gt("Robot_Hero_Red", "red", 3.0, 0.0)
+    stick, actual = sfr.stick_class((red_hero,), _pred("R3", 0.0, 0.0))
+    assert stick == sfr.STICK_NONE
+    assert actual is None
+
+
+def test_one_publish_enters_exactly_one_stick_class() -> None:
+    """三类互斥：贴错/贴对/附近没车各一条 + 一条 lost 不进——总数对得上。"""
+    blue_hero = _gt("Robot_Hero_Blue", "blue", 0.0, 0.0)
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 6.0, 0.0)
+    red_hero = _gt("Robot_Hero_Red", "red", 6.0, 4.0)
+    preds = (
+        _pred("R1", 0.4, 0.0),  # 贴错：R1 → B1
+        _pred("R3", 6.2, 0.0),  # 贴对：贴红步兵
+        _pred("RS", 0.0, 3.0),  # 附近没车：离任何真值都 ≥3 m
+        _pred("R3", 0.1, 0.1, "lost"),  # 非 confirmed，不进混淆表
+    )
+    report = sfr.count_frames(((((blue_hero, red_infantry, red_hero)), preds),))
+    assert report.confirmed_graded == 3
+    assert report.stick_wrong == 1
+    assert report.stick_right == 1
+    assert report.stick_none == 1
+    assert report.stick_wrong + report.stick_right + report.stick_none == report.confirmed_graded
+
+
+def test_wrong_split_covers_three_kinds_exclusively() -> None:
+    """贴错构成三类互斥：同兵种反队 / 同队异兵种 / 又反队又异兵种。"""
+    frames = [
+        (
+            (
+                _gt("Robot_Hero_Blue", "blue", 0.0, 0.0),
+                _gt("Robot_Hero_Red", "red", 6.0, 0.0),
+                _gt("Robot_Infantry_Blue_01", "blue", 6.0, 6.0),
+            ),
+            (
+                _pred("R1", 0.4, 0.0),  # →B1 同兵种反队
+                _pred("R3", 6.2, 0.0),  # →R1 同队异兵种
+                _pred("R1", 6.2, 6.0),  # →B3 又反队又异兵种
+            ),
+        )
+    ]
+    report = sfr.count_frames(frames)
+    assert report.stick_wrong == 3
+    assert dict(report.wrong_split) == {
+        sfr.WRONG_SAME_ROLE_OPP_TEAM: 1,
+        sfr.WRONG_SAME_TEAM_DIFF_ROLE: 1,
+        sfr.WRONG_BOTH_DIFF: 1,
+    }
+    # 并列时按「发布槽,实际槽」字典序稳定排序，保证可复现
+    assert report.confusion_pairs == (
+        ("R1", "B1", 1),
+        ("R1", "B3", 1),
+        ("R3", "R1", 1),
+    )
