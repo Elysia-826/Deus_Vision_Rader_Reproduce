@@ -8,6 +8,13 @@
 对不上、或 2.5 m 内没有这台车——哪怕位置贴着另一台车——都记 1 次虚报。
 漏报：蓝相机可见的真值里，这一帧没有任何同名槽发布，记 1 次漏报。
 
+会上裁判的虚报：默认 RADAR_SEND_LOST=0 时只有 confirmed 进 0x0305
+（TENTATIVE 永不进，LOST 要 include_lost）——referee_bound_false 只数
+confirmed，并把它拆成互斥三类（classify_false）：
+  a. team_swap      2.5 m 内有同兵种、反队的真值（R1 贴着蓝英雄）
+  b. wrong_position 同名真值在场但 ≥2.5 m
+  c. no_robot       场上没有这个槽对应的车
+
 score_identity_log.py 的 matched 是最近邻口径：槽名错了但位置贴近某台车
 会被算成命中——那不能当发布门的成功线。本文件按身份判，才是。
 
@@ -40,6 +47,13 @@ BLUE_JSON = _ROOT / "locate" / "calib" / "Camera_Radar_Blue.json"
 IMG_W, IMG_H = 4096, 3000
 MARGIN = 100
 GATE_M: Final = 2.5  # 同名真值必须在这个距离内，发布才算对
+
+# confirmed 虚报的互斥三类分解（优先级 a > b > c，一条发布只进一类）。
+# 默认 RADAR_SEND_LOST=0 时只有 confirmed 会进 0x0305（TENTATIVE 永不进，
+# LOST 要 include_lost），所以「会上裁判的虚报」= confirmed 虚报。
+FALSE_TEAM_SWAP: Final = "team_swap"  # a. 队伍认错：2.5 m 内有同兵种、反队的真值
+FALSE_WRONG_POSITION: Final = "wrong_position"  # b. 同名真值在场，但 ≥2.5 m
+FALSE_NO_ROBOT: Final = "no_robot"  # c. 场上没有这个槽对应的车
 
 
 def _visible(pose, x: float, y: float, z: float) -> bool:
@@ -75,6 +89,29 @@ class FrameCounts:
     correct: int
     errors: tuple[float, ...]
     false_slots: tuple[str, ...]
+    correct_state_errors: tuple[tuple[str, float], ...]  # (state, err) 每条正确发布
+    false_kind_state: tuple[tuple[str, str], ...]  # (kind, state) 每条虚报
+
+
+def classify_false(gt: Sequence[GtEntry], pred: PredEntry) -> str:
+    """一条虚报的互斥三类（a > b > c，一条发布只进一类）。
+
+    只对已判虚报的 pred 调用（同名真值 2.5 m 内就不是虚报了）：
+    a. team_swap —— 2.5 m 内有同兵种、反队的真值（R1 贴着蓝英雄）；
+    b. wrong_position —— 同名真值在场但 ≥2.5 m（同名存在优先于 c）；
+    c. no_robot —— 场上没有这个槽对应的车。
+    """
+    for g in gt:
+        if (
+            g.label != pred.slot
+            and g.label[1:] == pred.slot[1:]
+            and g.label[0] != pred.slot[0]
+            and ((pred.x - g.x) ** 2 + (pred.y - g.y) ** 2) ** 0.5 < GATE_M
+        ):
+            return FALSE_TEAM_SWAP
+    if any(g.label == pred.slot for g in gt):
+        return FALSE_WRONG_POSITION
+    return FALSE_NO_ROBOT
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,12 +127,17 @@ class Report:
     false_by_slot: tuple[tuple[str, int], ...]
     false_by_state: tuple[tuple[str, int], ...]
     state_counts: tuple[tuple[str, int], ...]
+    referee_bound_false: int  # 会上裁判的虚报 = confirmed 虚报（默认发送路径）
+    confirmed_false_kinds: tuple[tuple[str, int], ...]  # confirmed 虚报 a/b/c 分解
+    err_by_state: tuple[tuple[str, float, float, int], ...]  # 每态正确发布的 (median, max, n)
 
 
 def count_frame(gt: Sequence[GtEntry], preds: Sequence[PredEntry]) -> FrameCounts:
     """一帧的虚报/漏报。虚报按身份判：同队同兵种真值在 2.5 m 内才算对。"""
     errors: list[float] = []
     false_slots: list[str] = []
+    correct_state_errors: list[tuple[str, float]] = []
+    false_kind_state: list[tuple[str, str]] = []
     for pred in preds:
         best = min(
             (((pred.x - g.x) ** 2 + (pred.y - g.y) ** 2) ** 0.5 for g in gt if g.label == pred.slot),
@@ -103,8 +145,10 @@ def count_frame(gt: Sequence[GtEntry], preds: Sequence[PredEntry]) -> FrameCount
         )
         if best is not None and best < GATE_M:
             errors.append(best)
+            correct_state_errors.append((pred.state, best))
         else:
             false_slots.append(pred.slot)
+            false_kind_state.append((classify_false(gt, pred), pred.state))
     published_names = {pred.slot for pred in preds}
     misses = sum(1 for g in gt if g.visible and g.label not in published_names)
     return FrameCounts(
@@ -113,7 +157,22 @@ def count_frame(gt: Sequence[GtEntry], preds: Sequence[PredEntry]) -> FrameCount
         correct=len(preds) - len(false_slots),
         errors=tuple(errors),
         false_slots=tuple(false_slots),
+        correct_state_errors=tuple(correct_state_errors),
+        false_kind_state=tuple(false_kind_state),
     )
+
+
+def _state_err_stats(
+    pairs: Sequence[tuple[str, float]]
+) -> tuple[tuple[str, float, float, int], ...]:
+    by_state: dict[str, list[float]] = {}
+    for state, err in pairs:
+        by_state.setdefault(state, []).append(err)
+    out: list[tuple[str, float, float, int]] = []
+    for state in sorted(by_state):
+        ordered = sorted(by_state[state])
+        out.append((state, ordered[len(ordered) // 2], ordered[-1], len(ordered)))
+    return tuple(out)
 
 
 def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]) -> Report:
@@ -124,6 +183,8 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
     false_by_slot: dict[str, int] = {}
     false_by_state: dict[str, int] = {}
     state_counts: dict[str, int] = {}
+    correct_state_errors: list[tuple[str, float]] = []
+    confirmed_false_kinds: dict[str, int] = {}
     for gt, preds in frames:
         counts = count_frame(gt, preds)
         gt_total += len(gt)
@@ -133,12 +194,15 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
         misses += counts.misses
         correct += counts.correct
         errors.extend(counts.errors)
+        correct_state_errors.extend(counts.correct_state_errors)
         for slot in counts.false_slots:
             false_by_slot[slot] = false_by_slot.get(slot, 0) + 1
+        for kind, state in counts.false_kind_state:
+            false_by_state[state] = false_by_state.get(state, 0) + 1
+            if state == "confirmed":
+                confirmed_false_kinds[kind] = confirmed_false_kinds.get(kind, 0) + 1
         for pred in preds:
             state_counts[pred.state] = state_counts.get(pred.state, 0) + 1
-            if pred.slot in counts.false_slots:
-                false_by_state[pred.state] = false_by_state.get(pred.state, 0) + 1
     ordered = sorted(errors)
     return Report(
         frames=len(frames),
@@ -152,6 +216,9 @@ def count_frames(frames: Sequence[tuple[Sequence[GtEntry], Sequence[PredEntry]]]
         false_by_slot=tuple(sorted(false_by_slot.items())),
         false_by_state=tuple(sorted(false_by_state.items())),
         state_counts=tuple(sorted(state_counts.items())),
+        referee_bound_false=false_by_state.get("confirmed", 0),
+        confirmed_false_kinds=tuple(sorted(confirmed_false_kinds.items())),
+        err_by_state=_state_err_stats(correct_state_errors),
     )
 
 
@@ -191,6 +258,15 @@ def _fmt_pair(items: Sequence[tuple[str, int]]) -> str:
     return " ".join(f"{key}={value}" for key, value in items) if items else "-"
 
 
+def _fmt_state_err(items: Sequence[tuple[str, float, float, int]]) -> str:
+    if not items:
+        return "-"
+    return " | ".join(
+        f"{state} med={median:.3f}m max={maximum:.3f}m n={count}"
+        for state, median, maximum, count in items
+    )
+
+
 def report_lines(log: Path, report: Report) -> list[str]:
     lines = [f"=== {log} ==="]
     lines.append(f"frames={report.frames}")
@@ -201,6 +277,13 @@ def report_lines(log: Path, report: Report) -> list[str]:
     lines.append(f"false_reports={report.false_reports}")
     lines.append(f"  by_slot: {_fmt_pair(report.false_by_slot)}")
     lines.append(f"  by_state: {_fmt_pair(report.false_by_state)}")
+    lines.append(
+        f"  err_by_state (correct only): {_fmt_state_err(report.err_by_state)}"
+    )
+    lines.append(f"referee_bound_false (confirmed only)={report.referee_bound_false}")
+    lines.append(
+        f"  confirmed kinds: {_fmt_pair(report.confirmed_false_kinds)}"
+    )
     lines.append(f"misses={report.misses}")
     lines.append(f"correct={report.correct}")
     if report.errors:

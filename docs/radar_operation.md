@@ -515,6 +515,67 @@ RADAR_IDENTITY_LOG=<临时文件> python scripts/run_radar.py
 python scripts/score_false_reports.py <临时文件>
 ```
 
+#### 10.7.1 会上裁判的虚报分解（0.6 档复查，2026-10-24）
+
+测量于 `false-report-gate` @ `c0ce08f`（FRACTION 0.6，未再动任何门），三套
+序列重跑，默认 `RADAR_SEND_LOST=0` / `RADAR_GUESS=0`。**会上裁判的虚报 =
+confirmed 虚报**——`marks_from_publishes` 里 TENTATIVE 一律不发、LOST 需
+`include_lost`（§11.4 默认关），lost/tentative 的虚报默认到不了 0x0305。
+重跑日志与 10.7 A/B 日志逐字节一致（MD5）。
+
+**videoseq**（`scene/locate_out/videoseq`，200 帧，published 548，misses 661）：
+
+| 按态 | confirmed | lost | tentative |
+|---|---|---|---|
+| 虚报 | **130（会上裁判）** | 192 | 32 |
+| 正确发布误差 | med 0.764 / max 2.484 m（n=108） | med 1.978 / max 2.449 m（n=22） | med 1.084 / max 2.293 m（n=64） |
+
+confirmed 虚报三类（互斥）：**a 队伍认错 58** · **b 同名超距 67** · **c 场上无此车 5**。
+
+**videoseq_dwell**（`scene/locate_out/videoseq_dwell`，200 帧，published 622，misses 617）：
+
+| 按态 | confirmed | lost | tentative |
+|---|---|---|---|
+| 虚报 | **100（会上裁判）** | 180 | 40 |
+| 正确发布误差 | med 0.949 / max 2.480 m（n=131） | med 1.248 / max 2.404 m（n=38） | med 1.281 / max 2.346 m（n=133） |
+
+confirmed 虚报三类（互斥）：**a 队伍认错 15** · **b 同名超距 71** · **c 场上无此车 14**。
+
+**videoseq_2027_dwell**（`scene/locate_out/videoseq_2027_dwell`，200 帧，published 709，misses 522）：
+
+| 按态 | confirmed | lost | tentative |
+|---|---|---|---|
+| 虚报 | **189（会上裁判）** | 141 | 18 |
+| 正确发布误差 | med 0.130 / max 2.477 m（n=288） | med 0.706 / max 2.485 m（n=38） | med 0.313 / max 2.137 m（n=35） |
+
+confirmed 虚报三类（互斥）：**a 队伍认错 67** · **b 同名超距 112** · **c 场上无此车 10**。
+
+**汇总与决策**：
+
+| 序列 | confirmed 虚报 | a 队伍认错 | b 同名超距 | c 无此车 | 多数类 |
+|---|---|---|---|---|---|
+| videoseq | 130 | 58（44.6%） | **67（51.5%）** | 5 | b |
+| videoseq_dwell | 100 | 15（15%） | **71（71%）** | 14 | b |
+| videoseq_2027_dwell | 189 | 67（35.4%） | **112（59.3%）** | 10 | b |
+
+三套序列 confirmed 虚报都远超「可忽略」线（每套 ≤5），但多数类**全部是 b
+（同名超距），不是 a（队伍认错）**——按既定规则**不加队伍票静默门**，
+`_identity_publishable` 保持只看 role。即使把 b 类里「贴反队异兵种车」的也
+划进队伍错认，dwell 也只占 31%，换一种读法结论不变。
+
+b 类根因细分（confirmed 槽当帧刚吸收过观测，位置必在检出上；数字 = videoseq /
+dwell / 2027）：
+
+| b 类贴着谁 | videoseq | dwell | 2027 | 说明 |
+|---|---|---|---|---|
+| 同队异兵种车 | 31 | 49 | 82 | 兵种认错（1↔3 数字混淆既知问题） |
+| 反队异兵种车 | 31 | 16 | 28 | 队伍+兵种双错 |
+| 2.5 m 内没车 | 5 | 6 | 2 | 真位置漂移只占 2–8% |
+
+**结论**：会上裁判的虚报根因是**出生/吸附时身份认错（兵种为主），不是位置漂移，
+也主要不是队伍认错**——队伍票门对多数类无效，未采用，`track/cascade.py` 本轮未改。
+修复依赖图案分类器重训（2027 点阵屏样式未发布，见遗留项 1），不是收门能解决的。
+
 ---
 
 ## 11. stub 裁判基准

@@ -3,6 +3,12 @@
 提示词锁死的两条：
 - 槽名错但距离近（哪怕贴着别的车）→ 必须算虚报；
 - 同名且 <2.5 m → 不算虚报。
+
+confirmed 虚报的互斥三类分解（会上裁判的虚报 = confirmed）：
+- a 近距反队（同兵种）→ team_swap；
+- b 同名在场但 ≥2.5 m → wrong_position；
+- c 场上没有这个槽对应的车 → no_robot；
+- 一条发布只能进一类。
 """
 
 from __future__ import annotations
@@ -117,3 +123,75 @@ def test_parse_and_count_end_to_end() -> None:
     assert report.misses == 1
     assert len(report.errors) == 1
     assert abs(report.errors[0] - (0.1**2 + 0.1**2) ** 0.5) < 1e-6
+
+
+def test_classify_team_swap_near_opposite_team_same_role() -> None:
+    """近距反队（同兵种）必须算 a——同名真值同时在场（b 条件也成立）也只进 a。"""
+    blue_hero = _gt("Robot_Hero_Blue", "blue", 0.0, 0.0)
+    red_hero = _gt("Robot_Hero_Red", "red", 8.0, 0.0)
+    kind = sfr.classify_false((blue_hero, red_hero), _pred("R1", 0.4, 0.0))
+    assert kind == sfr.FALSE_TEAM_SWAP
+
+
+def test_classify_wrong_position_same_name_beyond_gate() -> None:
+    """同名真值在场但 ≥2.5 m 必须算 b。"""
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 5.0, 0.0)
+    kind = sfr.classify_false((red_infantry,), _pred("R3", 0.0, 0.0))
+    assert kind == sfr.FALSE_WRONG_POSITION
+
+
+def test_classify_no_robot_when_gt_missing() -> None:
+    """场上没有这个槽对应的车必须算 c。"""
+    red_hero = _gt("Robot_Hero_Red", "red", 3.0, 3.0)
+    kind = sfr.classify_false((red_hero,), _pred("RS", 0.1, 0.0))
+    assert kind == sfr.FALSE_NO_ROBOT
+
+
+def test_one_publish_enters_exactly_one_class() -> None:
+    """互斥：三类各一条时每条只进一类，虚报总数对得上。"""
+    blue_hero = _gt("Robot_Hero_Blue", "blue", 0.0, 0.0)
+    red_hero = _gt("Robot_Hero_Red", "red", 8.0, 0.0)
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 5.0, 5.0)
+    preds = (
+        _pred("R1", 0.4, 0.0),  # a：贴着蓝英雄（红英雄在场但远——b 条件同时成立）
+        _pred("R3", 0.0, 0.0),  # b：红步兵在场但 7 m 远
+        _pred("RS", -3.0, 0.0),  # c：场上没有哨兵
+    )
+    counts = sfr.count_frame((blue_hero, red_hero, red_infantry), preds)
+    kinds = [kind for kind, _state in counts.false_kind_state]
+    assert counts.false_reports == 3
+    assert sorted(kinds) == sorted(
+        [sfr.FALSE_TEAM_SWAP, sfr.FALSE_WRONG_POSITION, sfr.FALSE_NO_ROBOT]
+    )
+    assert len(set(kinds)) == 3  # 没有一条进两类
+
+
+def test_referee_bound_false_counts_confirmed_only() -> None:
+    """会上裁判的虚报只数 confirmed；lost/tentative 默认不进 0x0305。"""
+    frames = [
+        ((_gt("Robot_Infantry_Red_01", "red", 5.0, 5.0),), (_pred("R4", 0.0, 0.0),)),
+        ((_gt("Robot_Hero_Red", "red", 5.0, 5.0),), (_pred("B2", 0.0, 0.0, "lost"),)),
+        ((_gt("Robot_Hero_Blue", "blue", 5.0, 5.0),), (_pred("B1", 0.0, 0.0, "tentative"),)),
+    ]
+    report = sfr.count_frames(frames)
+    assert report.false_reports == 3
+    assert report.referee_bound_false == 1
+    assert dict(report.confirmed_false_kinds) == {sfr.FALSE_NO_ROBOT: 1}
+
+
+def test_err_by_state_splits_correct_errors() -> None:
+    """每态误差中位/最差只统计该态的正确发布。"""
+    red_infantry = _gt("Robot_Infantry_Red_01", "red", 0.0, 0.0)
+    frames = [
+        (
+            (red_infantry,),
+            (
+                _pred("R3", 1.0, 0.0, "confirmed"),
+                _pred("R3", 2.0, 0.0, "lost"),
+            ),
+        )
+    ]
+    report = sfr.count_frames(frames)
+    stats = {state: (median, maximum, n) for state, median, maximum, n in report.err_by_state}
+    assert stats["confirmed"] == (1.0, 1.0, 1)
+    assert stats["lost"] == (2.0, 2.0, 1)
