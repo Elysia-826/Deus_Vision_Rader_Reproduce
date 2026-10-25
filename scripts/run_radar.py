@@ -117,7 +117,52 @@ RECORD_PATH = Path(
 RECORD_FPS = float(os.environ.get("RADAR_RECORD_FPS", "10"))  # 仿真 10Hz；真机相机源设 25/30
 # RADAR_FULLSCREEN=1：imshow 窗口全屏（上场机接基座 HDMI 屏用）。
 FULLSCREEN = os.environ.get("RADAR_FULLSCREEN", "0") == "1"
+# RADAR_MATCH=1：比赛档。由 scripts/match_radar.* 置位。开发默认关，
+# 考核/打分开关仍可单独开。置位后拒绝仿真源、stub、录像、猜点、外推发布和相位压缩。
+MATCH = os.environ.get("RADAR_MATCH", "0") == "1"
+_MATCH_CAMERAS = frozenset({"Camera_Radar_Blue", "Camera_Radar_Red"})
 # =========================
+
+
+def match_profile_errors(
+    *,
+    match: bool,
+    source: str,
+    camera_name: str,
+    fullscreen: bool,
+    headless: bool,
+    stub: bool,
+    record: bool,
+    guess: bool,
+    send_lost: bool,
+    phase_scale: float,
+) -> tuple[str, ...]:
+    """比赛档违规清单。match 为假时不检查，考核跑批不受影响。"""
+    if not match:
+        return ()
+    errors: list[str] = []
+    if source != "hik":
+        errors.append(f"RADAR_SOURCE 必须是 hik，当前是 {source}")
+    if camera_name not in _MATCH_CAMERAS:
+        errors.append(
+            "RADAR_CAMERA_NAME 必须是 Camera_Radar_Blue 或 Camera_Radar_Red，"
+            f"当前是 {camera_name!r}"
+        )
+    if not fullscreen:
+        errors.append("RADAR_FULLSCREEN 必须是 1")
+    if headless:
+        errors.append("RADAR_HEADLESS 必须是 0")
+    if stub:
+        errors.append("RADAR_REFEREE_STUB 必须是 0")
+    if record:
+        errors.append("RADAR_RECORD 必须是 0")
+    if guess:
+        errors.append("RADAR_GUESS 必须是 0")
+    if send_lost:
+        errors.append("RADAR_SEND_LOST 必须是 0")
+    if abs(phase_scale - 1.0) > 1e-6:
+        errors.append(f"RADAR_PHASE_SCALE 必须是 1，当前是 {phase_scale}")
+    return tuple(errors)
 
 ImageU8 = NDArray[uint8]
 
@@ -304,6 +349,21 @@ def overlay(
 
 
 def main() -> None:
+    errors = match_profile_errors(
+        match=MATCH,
+        source=SOURCE,
+        camera_name=CAMERA_NAME_ENV,
+        fullscreen=FULLSCREEN,
+        headless=HEADLESS,
+        stub=REFEREE_STUB,
+        record=RECORD,
+        guess=GUESS_LOST,
+        send_lost=SEND_LOST,
+        phase_scale=PHASE_SCALE,
+    )
+    if errors:
+        raise SystemExit("比赛档拒绝启动：\n" + "\n".join(errors))
+
     source = FrameSource(SOURCE)
     match source:
         case FrameSource.BLENDER | FrameSource.VIDEO | FrameSource.IMAGES | FrameSource.HIK:

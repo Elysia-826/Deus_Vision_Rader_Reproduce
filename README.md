@@ -69,6 +69,7 @@ RADAR_SOURCE=images RADAR_HEADLESS=1 python scripts/run_radar.py  # 回放
 RADAR_SOURCE=hik RADAR_HIK_URL=0 python scripts/run_radar.py      # USB 相机
 RADAR_SOURCE=hik RADAR_HIK_URL=rtsp://... python scripts/run_radar.py  # RTSP
 scripts\watch_radar.cmd                                            # 真机守护：崩溃自动重启（先设好环境变量再启动）
+scripts\match_radar.cmd Red                                       # 比赛档：锁 hik + 全屏，拒绝考核开关，再交给守护
 
 # 标定
 python scripts/calibrate_pnp.py frame.jpg --intrinsics <K.json>  # 真机 PnP（推荐，点击后有 WASD 放大镜微调）
@@ -111,6 +112,7 @@ python scripts/score_referee.py
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
+| `RADAR_MATCH` | `0` | 1 = 比赛档。必须 hik、全屏、相机名 Blue/Red；拒绝 stub、录像、猜点、外推发布、相位压缩。上场用 `scripts/match_radar.*`，不要手设 |
 | `RADAR_SOURCE` | `blender` | 图源：blender / video / images / hik |
 | `RADAR_HEADLESS` | `0` | 1 = 不弹窗口 |
 | `RADAR_IMAGES_DIR` | `scene/locate_out/videoseq` | images 源目录（跑基准用 `videoseq_dwell`） |

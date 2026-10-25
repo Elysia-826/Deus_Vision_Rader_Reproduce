@@ -172,11 +172,14 @@ python scripts/calibrate_pnp.py frame.jpg --intrinsics <内参.json>
 
 4. - [ ] 残差 < 12 px；`Camera_Field.json` 写出
 5. - [ ] `run_radar.py` 指向 `Camera_Field.json`，`LOCATE_MODE = "ray"`
-6. - [ ] 接相机源：
+6. - [ ] 接相机源走比赛档（不要手开 stub / 录像 / 猜点）：
 
-```bash
-RADAR_SOURCE=hik RADAR_HIK_URL=0 python scripts/run_radar.py
+```bat
+scripts\match_radar.cmd Blue
+scripts\match_radar.cmd Red
 ```
+
+Linux：`scripts/match_radar.sh Blue` 或 `Red`。脚本锁 `RADAR_SOURCE=hik`、全屏、相位不压缩，并拒绝考核开关。USB 默认第 0 路；RTSP 先设 `RADAR_HIK_URL` 再启动。
 
 7. - [ ] **实地验收**：
    - 找一台车停在前哨旁 → 小地图点应落在该前哨附近（误差 < 半个车身）
