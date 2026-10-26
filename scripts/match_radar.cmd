@@ -1,8 +1,9 @@
 @echo off
-rem 比赛档：锁死上场开关，再交给守护进程。考核/打分不要用这个脚本。
-rem 用法：scripts\match_radar.cmd Blue
-rem       scripts\match_radar.cmd Red
-rem USB 第 0 路是默认。RTSP 先设 RADAR_HIK_URL 再启动。
+rem Match profile: locks the match-day switches, then hands over to the watchdog.
+rem Do not use this launcher for assessment or scoring runs.
+rem Usage: scripts\match_radar.cmd Blue
+rem        scripts\match_radar.cmd Red
+rem USB device 0 is the default. For RTSP set RADAR_HIK_URL before starting.
 setlocal
 cd /d "%~dp0.."
 
