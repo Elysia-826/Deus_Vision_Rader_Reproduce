@@ -61,6 +61,8 @@ def test_trigger_double_counts_monotonically() -> None:
         assert payload[:2] == SUB_RADAR_DECISION.to_bytes(2, "little")
         assert payload[2:6] == b"\x09\x00\x80\x80"  # 红雷达 9 + 服务器
         assert payload[7] == 0  # 不动密钥
+        assert payload[14] == 0  # 加固计数不随双倍递增
+        assert len(payload) == 19
     assert [payload[6] for _, payload in frames] == [1, 2]
 
 
@@ -73,6 +75,7 @@ def test_verify_enemy_password_carries_key_and_current_counter() -> None:
     assert last[6] == 1  # 双倍计数保持 1，不因发密钥递增
     assert last[7] == 2  # 指令类型 = 提交对方密钥
     assert last[8:14] == b"Zz9x8y"
+    assert last[14] == 0  # 加固计数不随密钥提交递增
 
 
 def test_blue_link_uses_blue_radar_sender_id() -> None:
@@ -86,14 +89,14 @@ def test_blue_link_uses_blue_radar_sender_id() -> None:
 def test_poll_parses_all_downlink_commands() -> None:
     link, pair = _red_link()
     game = pack_frame(seq=0, cmd_id=CMD_GAME_STATUS, payload=b"\x41" + (120).to_bytes(2, "little") + (0).to_bytes(8, "little"))
-    hp = pack_frame(seq=1, cmd_id=CMD_ROBOT_HP, payload=(100).to_bytes(2, "little") * 8)
+    hp = pack_frame(seq=1, cmd_id=CMD_ROBOT_HP, payload=(100).to_bytes(2, "little") * 12)
     mask = pack_frame(seq=2, cmd_id=CMD_MARK_PROGRESS, payload=(0x0021).to_bytes(2, "little"))
-    info = pack_frame(seq=3, cmd_id=CMD_RADAR_INFO, payload=bytes((0x03,)))
+    info = pack_frame(seq=3, cmd_id=CMD_RADAR_INFO, payload=bytes((0x03,)) + b"\x00" * 7)
     pair.peer.write(game + hp + mask + info)
     events = link.poll(timeout_s=0.0)
     assert len(events) == 4
     assert events[0].game_status is not None and events[0].game_status.game_progress == 4
-    assert events[1].robot_hp is not None and events[1].robot_hp.hero == 100
+    assert events[1].robot_hp is not None and events[1].robot_hp.heavy == 100
     assert events[2].mark_progress is not None and events[2].mark_progress.mask == 0x0021
     assert events[3].radar_info is not None and events[3].radar_info.double_chances == 3
 
@@ -102,13 +105,13 @@ def test_poll_ignores_unknown_and_corrupted_frames() -> None:
     link, pair = _red_link()
     unknown = pack_frame(seq=0, cmd_id=0x9999, payload=b"\x01")
     junk = b"\xa5\xff\xff\xff\xff\xff"
-    bad_len = pack_frame(seq=1, cmd_id=CMD_RADAR_INFO, payload=b"\x00\x00")  # 长度不符
-    good = pack_frame(seq=2, cmd_id=CMD_RADAR_INFO, payload=bytes((0x05,)))
+    bad_len = pack_frame(seq=1, cmd_id=CMD_RADAR_INFO, payload=b"\x00")  # 1B 拒收
+    good = pack_frame(seq=2, cmd_id=CMD_RADAR_INFO, payload=bytes((0x05,)) + b"\x00" * 7)
     pair.peer.write(junk + unknown + bad_len + good)
     events = link.poll(timeout_s=0.0)
     assert len(events) == 1
     assert events[0].radar_info is not None
-    assert events[0].radar_info == parse_radar_info(bytes((0x05,)))
+    assert events[0].radar_info == parse_radar_info(bytes((0x05,)) + b"\x00" * 7)
 
 
 def test_seq_increments_and_wraps_across_sends() -> None:

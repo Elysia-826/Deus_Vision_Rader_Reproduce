@@ -15,6 +15,7 @@ from referee.commands import (
     parse_mark_progress,
     parse_radar_info,
     parse_robot_hp,
+    slot_index_of,
 )
 from referee.errors import CommandDecodeError, FrameFormatError, PasswordFormatError
 from track.types import PublishedTrack, Team, TrackPhase
@@ -87,10 +88,28 @@ def test_marks_from_publishes_maps_enemy_and_ally_slots() -> None:
     enemy_inf3 = marks[2]
     assert enemy_inf3 is not None
     assert enemy_inf3 == mark_from_field(-1.0, 2.0)
-    own_hero = marks[6]
-    assert own_hero is not None
-    assert own_hero == mark_from_field(1.0, -2.0)
+    own_heavy = marks[6]
+    assert own_heavy is not None
+    assert own_heavy == mark_from_field(1.0, -2.0)
     assert all(m is None for i, m in enumerate(marks) if i not in (2, 6))
+
+
+def test_slot_index_drops_label_two_and_keeps_heavy_infantry_sentry() -> None:
+    own = Team.RED
+    assert slot_index_of(own, Team.BLUE, "B2") is None
+    assert slot_index_of(own, Team.RED, "R2") is None
+    assert slot_index_of(own, Team.BLUE, "B1") == 0
+    assert slot_index_of(own, Team.BLUE, "B3") == 2
+    assert slot_index_of(own, Team.BLUE, "B4") == 3
+    assert slot_index_of(own, Team.BLUE, "BS") == 5
+    assert slot_index_of(own, Team.RED, "R1") == 6
+
+
+def test_marks_from_publishes_label_two_stays_unsent() -> None:
+    marks = marks_from_publishes(
+        Team.RED, (_publish("B2", Team.BLUE, 1.0, 1.0, TrackPhase.CONFIRMED),)
+    )
+    assert all(m is None for m in marks)
 
 
 def test_marks_from_publishes_sentry_maps_to_index_five() -> None:
@@ -139,8 +158,9 @@ def test_marks_from_publishes_never_sends_tentative() -> None:
 
 def test_radar_decision_content_layout() -> None:
     content = encode_radar_decision_content(2, PasswordAction.VERIFY_ENEMY, "ab12CD")
-    assert content == b"\x02" + b"\x02" + b"ab12CD"
-    assert len(content) == 8
+    assert content[:8] == b"\x02" + b"\x02" + b"ab12CD"
+    assert content[8:] == b"\x00" * 5
+    assert len(content) == 13
 
 
 def test_radar_decision_rejects_bad_passwords() -> None:
@@ -153,9 +173,9 @@ def test_radar_decision_rejects_bad_passwords() -> None:
 
 
 def test_robot_interaction_header_order() -> None:
-    payload = encode_robot_interaction(0x0121, 9, 0x8080, b"\x00" * 8)
+    payload = encode_robot_interaction(0x0121, 9, 0x8080, b"\x00" * 13)
     assert payload[:6] == b"\x21\x01" + b"\x09\x00" + b"\x80\x80"
-    assert len(payload) == 14
+    assert len(payload) == 19
 
 
 def test_robot_interaction_rejects_oversized_content() -> None:
@@ -179,36 +199,59 @@ def test_parse_game_status() -> None:
 
 
 def test_parse_robot_hp_skips_reserved() -> None:
-    raw = b"".join(value.to_bytes(2, "little") for value in (400, 300, 200, 100, 0, 60, 5000, 3000))
+    values = (400, 0, 200, 100, -2, 60, 5000, 3000, 1111, 2222, 7, 9)
+    raw = b"".join(
+        (v.to_bytes(2, "little", signed=True) if i == 4 else v.to_bytes(2, "little"))
+        for i, v in enumerate(values)
+    )
     hp = parse_robot_hp(raw)
-    assert (hp.hero, hp.engineer, hp.infantry3, hp.infantry4) == (400, 300, 200, 100)
-    assert (hp.sentry, hp.outpost, hp.base) == (60, 5000, 3000)
+    assert (hp.heavy, hp.infantry3, hp.infantry4) == (400, 200, 100)
+    assert hp.damage_diff == -2
+    assert (hp.sentry, hp.red_outpost, hp.own_base) == (60, 5000, 3000)
+    assert (hp.blue_outpost, hp.enemy_base, hp.own_control, hp.enemy_control) == (1111, 2222, 7, 9)
 
 
 def test_parse_mark_progress_bits() -> None:
     progress = parse_mark_progress((0b0000_0000_0100_0001).to_bytes(2, "little"))
-    assert progress.enemy_vulnerable(0) is True  # 敌英雄
+    assert progress.enemy_vulnerable(0) is True  # 敌重装
     assert progress.enemy_vulnerable(2) is False  # 敌步3
-    assert progress.ally_marked(0) is True  # 己英雄（bit6）
+    assert progress.ally_marked(0) is True  # 己重装（bit6）
     assert progress.ally_marked(1) is False
 
 
 def test_parse_radar_info_bitfields() -> None:
     raw = 0b0010_1110  # 机会 2 | 对方触发中 | 加密等级 1 | 可改密钥
-    info = parse_radar_info(bytes((raw,)))
+    info = parse_radar_info(bytes((raw,)) + b"\x00" * 7)
     assert info.double_chances == 2
     assert info.enemy_double_active is True
     assert info.own_encryption_level == 1
     assert info.can_change_password is True
+    assert info.armor_fortify_active is False
+    assert info.fortify_chances == 0
+
+
+def test_parse_radar_info_fortify_fields() -> None:
+    payload = bytearray(8)
+    payload[0] = 0b0010_1110
+    payload[1] = 0b0000_1101  # 加固生效 + 剩余机会 6
+    payload[2:4] = (1400).to_bytes(2, "little")
+    payload[4:6] = (750).to_bytes(2, "little")
+    payload[6:8] = (300).to_bytes(2, "little")
+    info = parse_radar_info(bytes(payload))
+    assert info.armor_fortify_active is True
+    assert info.fortify_chances == 6
+    assert (info.fortify_x_mm, info.fortify_y_mm, info.fortify_radius_mm) == (1400, 750, 300)
 
 
 def test_parsers_reject_wrong_lengths() -> None:
     with pytest.raises(CommandDecodeError):
         parse_game_status(b"\x00" * 10)
     with pytest.raises(CommandDecodeError):
-        parse_robot_hp(b"\x00" * 15)
+        parse_robot_hp(b"\x00" * 16)
     with pytest.raises(CommandDecodeError):
         parse_mark_progress(b"\x00" * 3)
+    with pytest.raises(CommandDecodeError):
+        parse_radar_info(b"\x00")
     with pytest.raises(CommandDecodeError):
         parse_radar_info(b"\x00\x00")
 

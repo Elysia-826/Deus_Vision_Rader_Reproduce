@@ -463,7 +463,7 @@ python scripts/diagnose.py --seq <目录> --mode conf   # 换序列（默认 vid
 - 连击 x：准确 +1.0 / 半准确 +0.5（上次好则累进），错误 -0.8（上次坏则连扣）
 - 中断：累计 0.5 s 没收到该机器人坐标 → 追加一次"错误"
 - P ∈ [0, 150]；敌方 P≥100 记易伤秒；**多台同时易伤不叠加**（工会时间取并集）
-- 1 Hz 回发 0x020C（易伤掩码）/ 0x020E（双倍机会数/触发中）
+- 1 Hz 回发 0x020C（易伤掩码，2B）/ 0x020E（8B：双倍机会数/触发中；后 7 字节为 0，stub 不仿真加固）
 - 金标测试：`tests/referee/test_stub.py::test_rulebook_example` 逐值对照规则手册 worked example
 
 ### 11.2 跑法

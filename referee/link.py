@@ -71,6 +71,7 @@ class RefereeLink:
         self._seq = 0
         self._last_map_sent_s: float | None = None
         self._double_counter = 0
+        self._fortify_counter = 0
         self._own_team = own_team
         self._self_id = RED_RADAR_ID if own_team is Team.RED else BLUE_RADAR_ID
 
@@ -135,7 +136,12 @@ class RefereeLink:
         self._seq = (self._seq + 1) & 0xFF
 
     def _send_radar_decision(self, action: PasswordAction, password: str) -> None:
-        content = encode_radar_decision_content(self._double_counter, action, password)
+        content = encode_radar_decision_content(
+            self._double_counter,
+            action,
+            password,
+            fortify_counter=self._fortify_counter,
+        )
         payload = encode_robot_interaction(SUB_RADAR_DECISION, self._self_id, SERVER_ID, content)
         self._send(CMD_ROBOT_INTERACTION, payload)
 

@@ -223,7 +223,7 @@ class StubReferee:
         return mask
 
     def radar_info_byte(self) -> int:
-        """0x020E：bit0-1 剩余机会（挣到的-已用的），bit2 双倍生效中。"""
+        """0x020E byte0：bit0-1 剩余机会（挣到的-已用的），bit2 双倍生效中。"""
         earned = int(self._union_vuln_s // DOUBLE_CHANCE_S)
         remaining = max(0, min(3, earned - self._double_used))
         active = (
@@ -232,6 +232,10 @@ class StubReferee:
             and self._double_active_until_s > self._last_step_s
         )
         return remaining | (0x04 if active else 0)
+
+    def radar_info_payload(self) -> bytes:
+        """0x020E 8B。后 7 字节为 0：stub 不仿真加固。"""
+        return bytes((self.radar_info_byte(),)) + b"\x00" * 7
 
     def trigger_double(self) -> None:
         """收到雷达 0x0121 触发：扣一次机会，30s 双倍生效。没机会则忽略。"""
@@ -339,5 +343,5 @@ class StubReferee:
             pack_frame(seq=0, cmd_id=CMD_MARK_PROGRESS, payload=mask.to_bytes(2, "little"))
         )
         self._transport.write(
-            pack_frame(seq=1, cmd_id=CMD_RADAR_INFO, payload=bytes((self.radar_info_byte(),)))
+            pack_frame(seq=1, cmd_id=CMD_RADAR_INFO, payload=self.radar_info_payload())
         )

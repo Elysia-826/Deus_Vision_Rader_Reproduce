@@ -10,7 +10,7 @@ from referee.stub import Judgement, StubReferee
 from referee.transport import LoopbackPair
 from track.types import SimRobot, Team
 
-_E = 1  # 敌方工程槽（英雄=0，工程=1）
+_E = 2  # 敌方步兵 3 槽（重装=0，保留=1，步3=2）
 
 
 def _pair(own: Team) -> tuple[RefereeLink, StubReferee]:
@@ -21,8 +21,8 @@ def _pair(own: Team) -> tuple[RefereeLink, StubReferee]:
     return link, stub
 
 
-def _engineer(x: float = 5.0, y: float = 3.0) -> tuple[SimRobot, ...]:
-    return (SimRobot(name="Robot_Engineer_Red", team=Team.RED, x=x, y=y, z=0.2, label="R2"),)
+def _infantry3(x: float = 5.0, y: float = 3.0) -> tuple[SimRobot, ...]:
+    return (SimRobot(name="Robot_Infantry_3_Red", team=Team.RED, x=x, y=y, z=0.2, label="R3"),)
 
 
 def _marks(slot: int, x_m: float, y_m: float) -> tuple[MapMark | None, ...]:
@@ -39,7 +39,7 @@ def test_rulebook_example() -> None:
     复发两发全准 → 98.6,100.6。
     """
     link, stub = _pair(Team.BLUE)
-    stub.set_truth(_engineer(5.0, 3.0))
+    stub.set_truth(_infantry3(5.0, 3.0))
     stub.step(now_s=0.0)  # 开赛，中断计时起点
 
     good = [round(0.2 * n, 3) for n in range(1, 16)]  # 0.2 … 3.0
@@ -85,7 +85,7 @@ def test_silence_from_match_start_clamps_at_zero() -> None:
 def test_zero_zero_mark_does_not_reset_interruption() -> None:
     """(0,0) 是「未发送」，不该让中断计时归零。"""
     link, stub = _pair(Team.BLUE)
-    stub.set_truth(_engineer())
+    stub.set_truth(_infantry3())
     stub.step(now_s=0.0)
     link.send_map((None,) * 12, now_s=0.2)
     stub.step(now_s=0.2)
@@ -110,24 +110,24 @@ def test_union_vulnerability_and_double_trigger() -> None:
     stub.set_truth(
         (
             SimRobot(name="Robot_Hero_Red", team=Team.RED, x=-1.0, y=1.0, z=0.4, label="R1"),
-            SimRobot(name="Robot_Engineer_Red", team=Team.RED, x=5.0, y=3.0, z=0.2, label="R2"),
+            SimRobot(name="Robot_Infantry_3_Red", team=Team.RED, x=5.0, y=3.0, z=0.2, label="R3"),
         )
     )
     stub.step(now_s=0.0)
-    marks = _marks(0, -1.0, 1.0)[:1] + _marks(1, 5.0, 3.0)[1:]  # 两槽同时发
+    marks = _marks(0, -1.0, 1.0)[:1] + _marks(2, 5.0, 3.0)[1:]  # 重装 + 步3
     for n in range(1, 16):
         t = round(0.2 * n, 3)
         assert link.send_map(marks, now_s=t)
         stub.step(now_s=t)
     assert stub.p_at(0) == pytest.approx(120.0)
-    assert stub.p_at(1) == pytest.approx(120.0)
+    assert stub.p_at(2) == pytest.approx(120.0)
     for t in (3.2, 4.2, 5.2):  # 两台都在易伤：工会时间只走一份
         stub.step(now_s=t)
     summary = stub.summary()
     # 易伤从第 14 发（t=2.8，P=105）就开始：0.2+0.2+0.2+1.0+1.0 = 2.6s
     assert summary.union_vuln_s == pytest.approx(2.6)
     assert summary.vuln_s[0] == pytest.approx(2.6)
-    assert summary.vuln_s[1] == pytest.approx(2.6)
+    assert summary.vuln_s[2] == pytest.approx(2.6)
     assert stub.radar_info_byte() & 0x04 == 0
     stub.trigger_double()  # 还没挣到机会：静默忽略
     assert stub.radar_info_byte() & 0x04 == 0
@@ -148,7 +148,7 @@ def test_union_vulnerability_and_double_trigger() -> None:
 
 def test_log_frame_writes_parseable_records(tmp_path) -> None:
     link, stub = _pair(Team.BLUE)
-    stub.set_truth(_engineer())
+    stub.set_truth(_infantry3())
     stub.step(now_s=0.0)
     link.send_map(_marks(_E, 5.0, 3.0), now_s=0.2)
     stub.step(now_s=0.2)
@@ -156,10 +156,21 @@ def test_log_frame_writes_parseable_records(tmp_path) -> None:
     stub.log_frame(log, frame=1, now_s=0.2)
     record = json.loads(log.read_text(encoding="utf-8"))
     assert record["frame"] == 1
-    assert record["slots"]["E2"]["p"] == pytest.approx(1.0)
-    assert record["slots"]["E2"]["sent"] is True
-    assert record["slots"]["E2"]["judge"] == "accurate"
+    assert record["slots"]["E3"]["p"] == pytest.approx(1.0)
+    assert record["slots"]["E3"]["sent"] is True
+    assert record["slots"]["E3"]["judge"] == "accurate"
     assert "E1" not in record["slots"]  # 没真值也没发过的槽不写
+
+
+def test_stub_radar_info_is_eight_bytes_and_poll_reads_chances() -> None:
+    link, stub = _pair(Team.BLUE)
+    stub.step(now_s=0.0)
+    stub.step(now_s=1.0)  # 1Hz 反馈
+    events = link.poll(timeout_s=0.0)
+    infos = [e.radar_info for e in events if e.radar_info is not None]
+    assert infos
+    assert infos[-1].double_chances == stub.radar_info_byte() & 0x03
+    assert len(stub.radar_info_payload()) == 8
 
 
 def test_prepare_phase_marks_do_not_score() -> None:
@@ -170,7 +181,7 @@ def test_prepare_phase_marks_do_not_score() -> None:
     link = RefereeLink(pair.radar, own_team=Team.BLUE)
     stub = StubReferee(pair.peer, own_team=Team.BLUE)
     stub.set_phase_scale(1.0)  # 真实时长：准备 180s
-    stub.set_truth(_engineer())
+    stub.set_truth(_infantry3())
 
     # 准备期（0~180s）：发标记但不计分
     assert phase_at(100.0) is GamePhase.PREPARE

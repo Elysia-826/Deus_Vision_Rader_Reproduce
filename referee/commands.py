@@ -1,10 +1,10 @@
-"""雷达相关命令字的载荷编解码。依据《RM2026 通信协议 V1.3.0》，全小端。
+"""雷达相关命令字的载荷编解码。依据《RM2027 通信协议 V1.0.0（20261029）》，全小端。
 
 上行（雷达 → 服务器）：
   0x0305 小地图敌方+己方坐标（48B，≤5Hz，(0,0) 表示该机器人不发送）
-  0x0301 机器人交互数据外壳；雷达自主决策作为其子内容 0x0121（8B）
+  0x0301 机器人交互数据外壳；雷达自主决策作为其子内容 0x0121（13B）
 下行（服务器 → 雷达）：
-  0x0001 比赛状态  0x0003 己方血量  0x020C 标记进度掩码  0x020E 雷达决策信息
+  0x0001 比赛状态  0x0003 机器人血量  0x020C 标记进度掩码  0x020E 雷达决策信息
 
 坐标系（0x020B 注）：原点在红方补给站附近场角，+X 沿长边向蓝方，+Y 沿短边
 向红方停机坪，单位 cm。本仓场地系原点在中心、+x 蓝侧，与裁判 +X 同向；
@@ -33,12 +33,12 @@ SERVER_ID: Final[int] = 0x8080  # 哨兵/雷达自主决策指令的接收者
 RED_RADAR_ID: Final[int] = 9
 BLUE_RADAR_ID: Final[int] = 109
 
-_MAP_DATA_LEN: Final[int] = 48  # 24 × uint16 cm
-_HP_DATA_LEN: Final[int] = 16  # 8 × uint16
+_MAP_DATA_LEN: Final[int] = 48  # 12 槽 × 2 × uint16 cm
+_HP_DATA_LEN: Final[int] = 24  # 12 × uint16；offset 8 为 int16 伤害差
 _GAME_STATUS_LEN: Final[int] = 11
 _MARK_PROGRESS_LEN: Final[int] = 2
-_RADAR_INFO_LEN: Final[int] = 1
-_RADAR_DECISION_LEN: Final[int] = 8  # radar_cmd(1) + password_cmd(1) + key(6)
+_RADAR_INFO_LEN: Final[int] = 8  # byte0 双倍/密钥；byte1 加固；2/4/6 圆心 mm
+_RADAR_DECISION_LEN: Final[int] = 13  # 双倍(1)+密钥指令(1)+key(6)+加固计数(1)+xy mm(4)
 
 _PASSWORD_ACTION_NONE: Final[int] = 0
 _PASSWORD_ACTION_UPDATE_OWN: Final[int] = 1
@@ -81,9 +81,9 @@ def mark_from_field(x_m: float, y_m: float) -> MapMark:
 
 
 def encode_map_positions(marks: tuple[MapMark | None, ...]) -> bytes:
-    """12 槽 → 48B。槽序：敌方 hero/engineer/inf3/inf4/aerial/sentry，己方同序。
+    """12 槽 → 48B。槽序：敌方 重装/保留/步3/步4/保留/哨兵，己方同序。
 
-    None = 该机器人不发（(0,0)）。空中机器人当前视觉不标，传 None。
+    None = 该机器人不发（(0,0)）。下标 1、4 无角色映射，保持 (0,0)。
     """
     if len(marks) != 12:
         raise FrameFormatError(f"0x0305 需要 12 个槽，收到 {len(marks)}")
@@ -123,14 +123,14 @@ def field_from_mark(mark: MapMark) -> tuple[float, float]:
     return x_m, y_m
 
 
-ROLE_TO_INDEX: Final[dict[str, int]] = {"1": 0, "2": 1, "3": 2, "4": 3, "S": 5}
-"""槽内序：hero=0 engineer=1 inf3=2 inf4=3 aerial=4(视觉不占) sentry=5。"""
+ROLE_TO_INDEX: Final[dict[str, int]] = {"1": 0, "3": 2, "4": 3, "S": 5}
+"""槽内序：重装=0 保留=1 步3=2 步4=3 保留=4 哨兵=5。标签 2 不进 0x0305。"""
 
 _ROBOT_IDS: Final[tuple[int, ...]] = (1, 2, 3, 4, 6, 7)
 SLOT_NAMES: Final[tuple[str, ...]] = tuple(
     f"{'E' if i < 6 else 'A'}{_ROBOT_IDS[i % 6]}" for i in range(12)
 )
-"""12 槽的报告名。数字是协议附录二的机器人 ID（1 英雄 2 工程 3/4 步兵 6 空中 7 哨兵）。"""
+"""12 槽的报告名。下标 1/4 对应保留位（旧工程/空中 ID），无角色映射。"""
 
 
 def slot_index_of(own_team: Team, team: Team, label: str) -> int | None:
@@ -218,13 +218,23 @@ def encode_radar_decision_content(
     double_counter: int,
     action: PasswordAction,
     password: str = "000000",
+    *,
+    fortify_counter: int = 0,
+    fortify_x_mm: int = 0,
+    fortify_y_mm: int = 0,
 ) -> bytes:
-    """0x0121 内容段 8B：双倍易伤触发计数 + 密钥指令。
+    """0x0121 内容段 13B：双倍计数 + 密钥指令 + 加固（默认后 5 字节为 0）。
 
     double_counter 必须单调 +1（服务器校验），由 RefereeLink 管理，不在这校验。
+    fortify_counter 独立单调，trigger_double / 密钥更新不得递增。
+    加固坐标是裁判图 mm，不走 mark_from_field（那是 cm）。
     """
     if not 0 <= double_counter <= 0xFF:
         raise FrameFormatError(f"双倍计数超界: {double_counter}")
+    if not 0 <= fortify_counter <= 0xFF:
+        raise FrameFormatError(f"加固计数超界: {fortify_counter}")
+    if not 0 <= fortify_x_mm <= 0xFFFF or not 0 <= fortify_y_mm <= 0xFFFF:
+        raise FrameFormatError(f"加固坐标超 uint16 mm: {fortify_x_mm},{fortify_y_mm}")
     match action:
         case PasswordAction.NONE:
             cmd = _PASSWORD_ACTION_NONE
@@ -234,7 +244,13 @@ def encode_radar_decision_content(
             cmd = _PASSWORD_ACTION_VERIFY_ENEMY
         case unreachable:
             raise FrameFormatError(f"未知密钥指令: {unreachable}")
-    return bytes((double_counter, cmd)) + _check_password(password)
+    return (
+        bytes((double_counter, cmd))
+        + _check_password(password)
+        + bytes((fortify_counter,))
+        + fortify_x_mm.to_bytes(2, "little")
+        + fortify_y_mm.to_bytes(2, "little")
+    )
 
 
 def encode_robot_interaction(
@@ -317,41 +333,52 @@ def parse_game_status(payload: bytes) -> GameStatus:
 
 @dataclass(frozen=True, slots=True)
 class RobotHp:
-    """0x0003 己方血量。哨兵/前哨/基地齐全；保留位丢弃。"""
+    """0x0003 血量 24B。未上场/罚下 HP=0。不驱动双倍或标记门。"""
 
-    hero: int
-    engineer: int
+    heavy: int
     infantry3: int
     infantry4: int
+    damage_diff: int  # int16，本队相对伤害差
     sentry: int
-    outpost: int
-    base: int
+    red_outpost: int
+    own_base: int
+    blue_outpost: int
+    enemy_base: int
+    own_control: int
+    enemy_control: int
 
 
 def parse_robot_hp(payload: bytes) -> RobotHp:
     if len(payload) != _HP_DATA_LEN:
         raise CommandDecodeError(f"0x0003 应为 {_HP_DATA_LEN}B，得到 {len(payload)}B")
 
-    def hp(offset: int) -> int:
+    def u16(offset: int) -> int:
         return int.from_bytes(payload[offset : offset + 2], "little")
 
+    def i16(offset: int) -> int:
+        return int.from_bytes(payload[offset : offset + 2], "little", signed=True)
+
     return RobotHp(
-        hero=hp(0),
-        engineer=hp(2),
-        infantry3=hp(4),
-        infantry4=hp(6),
-        sentry=hp(10),
-        outpost=hp(12),
-        base=hp(14),
+        heavy=u16(0),
+        infantry3=u16(4),
+        infantry4=u16(6),
+        damage_diff=i16(8),
+        sentry=u16(10),
+        red_outpost=u16(12),
+        own_base=u16(14),
+        blue_outpost=u16(16),
+        enemy_base=u16(18),
+        own_control=u16(20),
+        enemy_control=u16(22),
     )
 
 
 @dataclass(frozen=True, slots=True)
 class MarkProgress:
-    """0x020C 掩码。对方易伤 = P≥100；己方特殊标识 = P≥50。
+    """0x020C 掩码 2B。对方易伤 = P≥100；己方特殊标识 = P≥50。
 
-    敌方槽序同 0x0305：hero/工程师/步3/步4/空中/哨兵 → bit 0..5；
-    己方同序 → bit 6..11。
+    敌方槽序同 0x0305：重装/保留/步3/步4/保留/哨兵 → bit 0..5；
+    己方同序 → bit 6..11。bit1、bit4、己方 bit7、bit10 为保留位。
     """
 
     mask: int
@@ -371,21 +398,32 @@ def parse_mark_progress(payload: bytes) -> MarkProgress:
 
 @dataclass(frozen=True, slots=True)
 class RadarInfo:
-    """0x020E：双倍易伤机会数 / 对方触发中 / 己方加密等级 / 可否改密钥。"""
+    """0x020E 8B：双倍/密钥（byte0）+ 加固状态与圆心 mm（byte1 及 offset 2/4/6）。"""
 
     double_chances: int  # 0~2
     enemy_double_active: bool
     own_encryption_level: int  # 1~3，即对方干扰波难度
     can_change_password: bool
+    armor_fortify_active: bool = False
+    fortify_chances: int = 0
+    fortify_x_mm: int = 0
+    fortify_y_mm: int = 0
+    fortify_radius_mm: int = 0
 
 
 def parse_radar_info(payload: bytes) -> RadarInfo:
     if len(payload) != _RADAR_INFO_LEN:
         raise CommandDecodeError(f"0x020E 应为 {_RADAR_INFO_LEN}B，得到 {len(payload)}B")
     raw = payload[0]
+    fortify = payload[1]
     return RadarInfo(
         double_chances=raw & 0x03,
         enemy_double_active=bool(raw & 0x04),
         own_encryption_level=(raw >> 3) & 0x03,
         can_change_password=bool(raw & 0x20),
+        armor_fortify_active=bool(fortify & 0x01),
+        fortify_chances=(fortify >> 1) & 0x07,
+        fortify_x_mm=int.from_bytes(payload[2:4], "little"),
+        fortify_y_mm=int.from_bytes(payload[4:6], "little"),
+        fortify_radius_mm=int.from_bytes(payload[6:8], "little"),
     )
